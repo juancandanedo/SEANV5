@@ -61,7 +61,7 @@ function fieldHtml(f, v) {
   if (f.type === "select") {
     input = `<select name="${f.name}"${req}${dis}>${f.blank !== false ? `<option value="">${esc(f.blank || "—")}</option>` : ""}${f.options.map((o) => `<option value="${esc(o.v)}" ${String(o.v) === String(val) ? "selected" : ""}>${esc(o.t)}</option>`).join("")}</select>`;
   } else if (f.type === "textarea") input = `<textarea name="${f.name}" rows="2"${req}${dis}>${esc(val)}</textarea>`;
-  else input = `<input name="${f.name}" type="${f.type || "text"}" value="${esc(val)}"${f.step ? ` step="${f.step}"` : ""}${f.min !== undefined ? ` min="${f.min}"` : ""}${f.max !== undefined ? ` max="${f.max}"` : ""}${f.autocomplete ? ` autocomplete="${f.autocomplete}"` : ""}${req}${dis}>`;
+  else input = `<input name="${f.name}" type="${f.type || "text"}"${f.accept ? ` accept="${f.accept}"` : ""}${f.type === "file" ? "" : ` value="${esc(val)}"`}${f.step ? ` step="${f.step}"` : ""}${f.min !== undefined ? ` min="${f.min}"` : ""}${f.max !== undefined ? ` max="${f.max}"` : ""}${f.autocomplete ? ` autocomplete="${f.autocomplete}"` : ""}${req}${dis}>`;
   return `<div class="field"><label>${esc(f.label)}${f.required ? " *" : ""}</label>${input}${f.hint ? `<small>${esc(f.hint)}</small>` : ""}</div>`;
 }
 
@@ -149,3 +149,26 @@ export const saldoPill = (s) => s > 0.004 ? `<span class="pos">${money(s)}</span
 export const notaPct = (n) => (n.total ? n.nota / n.total : 0);
 export const aprobado = (n) => notaPct(n) * 100 >= S.settings.nota_minima;
 export const resultPill = (n) => aprobado(n) ? `<span class="pill ok">Aprobado</span>` : `<span class="pill bad">Reprobado</span>`;
+
+// ---------- comprobantes (imágenes) ----------
+export const imgName = (imagen) => (imagen ? imagen.split("/").pop() : null);
+export const imgUrl = (imagen) => "/api/comprobante/" + encodeURIComponent(imgName(imagen));
+export const newImgName = () => { const d = new Date(); return `${Date.now().toString(36)}.IMAGEN.${String(d.getHours()).padStart(2, "0")}${String(d.getMinutes()).padStart(2, "0")}${String(d.getSeconds()).padStart(2, "0")}.jpg`; };
+
+// Reduce la foto (máx. 1600 px, JPEG) para que pese poco y respete el límite de la función
+export async function compressImage(file, max = 1600, q = 0.82) {
+  try {
+    const bmp = await createImageBitmap(file, { imageOrientation: "from-image" });
+    const k = Math.min(1, max / Math.max(bmp.width, bmp.height));
+    const c = document.createElement("canvas"); c.width = Math.round(bmp.width * k); c.height = Math.round(bmp.height * k);
+    c.getContext("2d").drawImage(bmp, 0, 0, c.width, c.height);
+    const blob = await new Promise((ok) => c.toBlob(ok, "image/jpeg", q));
+    if (blob) return blob;
+  } catch {}
+  if (file.size <= 4.5e6 && /^image\/(jpeg|png|webp|gif)$/.test(file.type)) return file;
+  throw new Error("No se pudo procesar la imagen (usa JPG o PNG)");
+}
+export async function uploadImage(name, blob) {
+  const r = await fetch("/api/comprobante/" + encodeURIComponent(name), { method: "POST", headers: { "content-type": blob.type || "image/jpeg" }, body: blob, credentials: "same-origin" });
+  if (!r.ok) { let m = "Error al subir la imagen"; try { m = (await r.json()).error || m; } catch {} throw new Error(m); }
+}

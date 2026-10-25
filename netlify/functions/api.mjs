@@ -1,5 +1,5 @@
 import crypto from "node:crypto";
-import { readKey, mutate, store } from "../lib/store.mjs";
+import { readKey, mutate, store, files } from "../lib/store.mjs";
 import { hashPassword, checkPassword, sign, verify, cookieOf } from "../lib/auth.mjs";
 import seed from "../../seed/seed.json" with { type: "json" };
 
@@ -146,7 +146,8 @@ export default async function handler(req) {
     const url = new URL(req.url);
     const parts = url.pathname.replace(/^\/api\/?/, "").split("/").filter(Boolean);
     const method = req.method;
-    const body = ["POST", "PUT", "PATCH"].includes(method) ? await req.json().catch(() => ({})) : {};
+    const isFile = parts[0] === "comprobante";
+    const body = ["POST", "PUT", "PATCH"].includes(method) && !isFile ? await req.json().catch(() => ({})) : {};
     const secure = url.protocol === "https:" ? "; Secure" : "";
     const setCookie = (t, maxAge) => ({ "set-cookie": `sid=${t}; HttpOnly; Path=/; SameSite=Lax; Max-Age=${maxAge}${secure}` });
 
@@ -233,6 +234,34 @@ export default async function handler(req) {
         if (id === user.id) throw fail(400, "No puedes eliminar tu propio usuario");
         await mutate("users", (arr) => ({ value: arr.filter((x) => x.id !== id), result: true }), []);
         return json({ ok: true });
+      }
+    }
+
+    if (parts[0] === "comprobantes" && method === "GET") {
+      if (!["admin", "tesoreria"].includes(user.rol)) throw fail(403, "Sin permiso");
+      return json(await files().list());
+    }
+    if (isFile) {
+      if (!["admin", "tesoreria"].includes(user.rol)) throw fail(403, "Sin permiso");
+      const name = decodeURIComponent(parts[1] || "");
+      if (!/^[A-Za-z0-9_.-]{3,120}$/.test(name)) throw fail(400, "Nombre de archivo inválido");
+      if (method === "GET") {
+        const f = await files().get(name);
+        if (!f) throw fail(404, "Imagen no encontrada");
+        return new Response(f.data, { headers: { "content-type": f.type, "cache-control": "private, max-age=86400", "x-content-type-options": "nosniff" } });
+      }
+      if (method === "POST") {
+        const type = (req.headers.get("content-type") || "").split(";")[0];
+        if (!/^image\/(jpeg|png|webp|gif)$/.test(type)) throw fail(400, "Solo imágenes JPG, PNG, WEBP o GIF");
+        const buf = Buffer.from(await req.arrayBuffer());
+        if (!buf.length) throw fail(400, "Archivo vacío");
+        if (buf.length > 5 * 1024 * 1024) throw fail(413, "La imagen supera 5 MB");
+        await files().put(name, buf, type);
+        return json({ ok: true, name, bytes: buf.length }, 201);
+      }
+      if (method === "DELETE") {
+        if (user.rol !== "admin") throw fail(403, "Solo el administrador");
+        await files().del(name); return json({ ok: true });
       }
     }
 

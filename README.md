@@ -32,3 +32,8 @@ Pruebas: `node tests/api.test.mjs`
 - Se unificó el libro duplicado «Vida Resucitada» (IDs f401b8bd y 81879993) en un solo registro.
 - Los tipos de pago (BL-JCC, BL-Iglesia, EF-Iglesia, BecaDFP) quedaron como catálogo editable.
 - Regenerar la semilla desde nuevos xlsx: `python3 tools/build_seed.py <carpeta>` (solo afecta instalaciones nuevas).
+
+## Comprobantes de pago (imágenes)
+- Al registrar/editar un pago se puede adjuntar una foto; se reduce a 1600 px (JPEG) y se guarda en Netlify Blobs (store `comprobantes`).
+- En *Cobros*, el botón 📎 abre el comprobante. Solo Administrador y Tesorería pueden verlos.
+- **Importar los 323 comprobantes existentes:** *Cobros → Importar comprobantes* y elige las fotos de la carpeta `ENTRADAS_Images` de AppSheet (Ctrl+A). Se asocian por nombre de archivo (ej. `137e716e.IMAGEN.142316.jpg`).

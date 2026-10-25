@@ -26,6 +26,31 @@ function localStore(dir) {
   };
 }
 
+// ---- archivos binarios (comprobantes) ----
+const safe = (n) => "img_" + n.replace(/[^a-zA-Z0-9_.-]/g, "_");
+let _files;
+export function files() {
+  if (_files) return _files;
+  if (process.env.LOCAL_STORE_DIR) {
+    const dir = path.join(process.env.LOCAL_STORE_DIR, "files"); fs.mkdirSync(dir, { recursive: true });
+    _files = {
+      async put(name, buf, type) { fs.writeFileSync(path.join(dir, safe(name)), buf); fs.writeFileSync(path.join(dir, safe(name) + ".type"), type); },
+      async get(name) { try { return { data: fs.readFileSync(path.join(dir, safe(name))), type: fs.readFileSync(path.join(dir, safe(name) + ".type"), "utf8") }; } catch { return null; } },
+      async del(name) { for (const x of ["", ".type"]) try { fs.unlinkSync(path.join(dir, safe(name) + x)); } catch {} },
+      async list() { return fs.readdirSync(dir).filter((f) => !f.endsWith(".type")).map((f) => f.replace(/^img_/, "")); },
+    };
+  } else {
+    const st = getStore({ name: "comprobantes", consistency: "strong" });
+    _files = {
+      async put(name, buf, type) { await st.set(name, buf, { metadata: { type } }); },
+      async get(name) { const r = await st.getWithMetadata(name, { type: "arrayBuffer" }); return r ? { data: Buffer.from(r.data), type: r.metadata?.type || "image/jpeg" } : null; },
+      async del(name) { await st.delete(name); },
+      async list() { const out = []; let cursor; do { const r = await st.list({ cursor }); out.push(...r.blobs.map((b) => b.key)); cursor = r.cursor; } while (cursor); return out; },
+    };
+  }
+  return _files;
+}
+
 let _store;
 export function store() {
   if (_store) return _store;

@@ -1,4 +1,4 @@
-import { S, esc, $, $$, api, col, cols, idx, invalidate, money, fdate, today, pct, norm, libroLabel, can, toast, modal, formModal, confirmBox, table, bindTables, exportXlsx, saldoPorEstudiante, saldoPill, notaPct, aprobado, resultPill } from "./lib.js";
+import { S, esc, $, $$, api, col, cols, idx, invalidate, money, fdate, today, pct, norm, libroLabel, can, toast, modal, formModal, confirmBox, table, bindTables, exportXlsx, imgName, imgUrl, newImgName, compressImage, uploadImage, saldoPorEstudiante, saldoPill, notaPct, aprobado, resultPill } from "./lib.js";
 
 const head = (title, sub = "", actions = "") => `<div class="head"><div><h1>${esc(title)}</h1>${sub ? `<div class="sub">${sub}</div>` : ""}</div><div class="actions">${actions}</div></div>`;
 const kpi = (l, v, n = "") => `<div class="card kpi"><div class="l">${esc(l)}</div><div class="v">${v}</div><div class="n">${n}</div></div>`;
@@ -108,11 +108,12 @@ export async function cobros(root) {
       { k: "debe", t: "Cargo", num: true, render: (c) => (c.debe ? money(c.debe) : "") },
       { k: "pago", t: "Pago", num: true, render: (c) => (c.pago ? `<span class="neg">${money(c.pago)}</span>` : "") },
       { k: "tipo_pago", t: "Tipo" }, { k: "notas", t: "Notas", wrap: true },
+      { k: "img", t: "Comp.", sort: (c) => (c.imagen ? 1 : 0), render: (c) => (c.imagen ? `<button class="btn sm" data-img="${esc(c.id)}" title="Ver comprobante">📎</button>` : "") },
       { k: "_", t: "", nosort: true, render: (c) => `<button class="btn sm" data-edit="${esc(c.id)}">Editar</button> <button class="btn sm danger" data-del="${esc(c.id)}">✕</button>` },
     ];
     $("#tbl", root).innerHTML = table("cob", cs, rows, { defaultSort: { k: "fecha", dir: -1 }, footer: `Cargos <b>${money(sum(rows, (c) => c.debe))}</b> · Pagos <b>${money(sum(rows, (c) => c.pago))}</b>` });
   };
-  root.innerHTML = head("Cobros", "Cargos por libro y pagos recibidos", `<button class="btn" id="exp">Exportar Excel</button><button class="btn" id="newc">+ Cargo</button><button class="btn primary" id="newp">+ Registrar pago</button>`) +
+  root.innerHTML = head("Cobros", "Cargos por libro y pagos recibidos", `<button class="btn" id="exp">Exportar Excel</button><button class="btn" id="imp">Importar comprobantes</button><button class="btn" id="newc">+ Cargo</button><button class="btn primary" id="newp">+ Registrar pago</button>`) +
     `<div class="filters"><input class="grow" id="q" placeholder="Buscar estudiante o nota…"><select id="libro"><option value="">Todos los libros</option>${[...new Set(d.cobros.map((c) => c.libro).filter(Boolean))].sort((a, b) => a - b).map((l) => `<option value="${l}">Libro ${l}</option>`).join("")}</select><select id="mov"><option value="">Cargos y pagos</option><option value="pago">Solo pagos</option><option value="cargo">Solo cargos</option></select><select id="tipo"><option value="">Todo tipo de pago</option>${d.tipos_pago.map((t) => `<option>${esc(t.id)}</option>`).join("")}</select><label class="dl">Desde <input type="date" id="desde"></label><label class="dl">Hasta <input type="date" id="hasta"></label></div><div id="tbl"></div>`;
   render();
   for (const k of ["q", "libro", "mov", "tipo", "desde", "hasta"]) $("#" + k, root).addEventListener(k === "q" ? "input" : "change", (e) => { f[k] = e.target.value; render(); });
@@ -129,20 +130,27 @@ export async function cobros(root) {
         { name: "monto", label: "Monto ($)", type: "number", step: "0.01", min: "0.01", required: true },
         { name: "tipo_pago", label: "Tipo de pago", type: "select", options: opts(d.tipos_pago, (t) => t.id, (t) => `${t.nombre} — ${t.descripcion || ""}`), hint: "Obligatorio si es un pago" },
         { name: "notas", label: "Notas", type: "textarea" },
+        { name: "archivo", label: c?.imagen ? "Reemplazar comprobante (foto)" : "Comprobante (foto)", type: "file", accept: "image/*", hint: "Opcional. Foto del recibo o transferencia; se reduce automáticamente." },
       ],
       onSubmit: async (v, m) => {
-        const body = { fecha: v.fecha, estudiante_id: v.estudiante_id, nivel_id: v.nivel_id, notas: v.notas, tipo_pago: v.tipo_pago, imagen: c?.imagen, debe: v.tipo === "cargo" ? v.monto : 0, pago: v.tipo === "pago" ? v.monto : 0 };
+        let imagen = c?.imagen;
+        if (v.archivo && v.archivo.size > 0) {
+          const name = newImgName(); await uploadImage(name, await compressImage(v.archivo)); imagen = "ENTRADAS_Images/" + name;
+        }
+        const body = { fecha: v.fecha, estudiante_id: v.estudiante_id, nivel_id: v.nivel_id, notas: v.notas, tipo_pago: v.tipo_pago, imagen, debe: v.tipo === "cargo" ? v.monto : 0, pago: v.tipo === "pago" ? v.monto : 0 };
         c ? await api("data/cobros/" + c.id, "PUT", body) : await api("data/cobros", "POST", body);
         invalidate("cobros"); m.close(); toast("Movimiento guardado"); await cobros(root);
       },
     });
   };
   $("#newp", root).onclick = () => form(null, "pago");
+  $("#imp", root).onclick = () => importer(d.cobros, eMap);
   $("#newc", root).onclick = () => form(null, "cargo");
   $("#exp", root).onclick = () => exportXlsx("cobros", filtered().map((c) => ({ Fecha: c.fecha, ID: c.estudiante_id, Estudiante: eMap[c.estudiante_id]?.nombre, Libro: c.libro, Cargo: c.debe || "", Pago: c.pago || "", "Tipo de pago": c.tipo_pago || "", Notas: c.notas || "" })), "Cobros");
   root.onclick = (ev) => {
     const b = ev.target.closest("button"); if (!b) return;
     if (b.dataset.edit) form(d.cobros.find((x) => x.id === b.dataset.edit));
+    if (b.dataset.img) { const c = d.cobros.find((x) => x.id === b.dataset.img); const m = modal(`Comprobante · ${eMap[c.estudiante_id]?.nombre || ""} · ${fdate(c.fecha)}`, `<div style="text-align:center"><img alt="Comprobante" src="${imgUrl(c.imagen)}" style="max-width:100%;max-height:70vh;border-radius:8px"><p class="empty hidden">Esta imagen aún no se ha cargado. Usa «Importar comprobantes».</p></div><p style="color:var(--muted);font-size:.85rem;margin-top:.6rem">${money(c.pago || c.debe)} · ${esc(imgName(c.imagen))}</p>`, { wide: true }); const im = $("img", m.el); im.onerror = () => { im.classList.add("hidden"); $(".empty", m.el).classList.remove("hidden"); }; }
     if (b.dataset.del) { const c = d.cobros.find((x) => x.id === b.dataset.del); confirmBox(`¿Eliminar este movimiento de ${eMap[c.estudiante_id]?.nombre} (${fdate(c.fecha)}, ${money(c.debe || c.pago)})?`, async () => { await api("data/cobros/" + c.id, "DELETE"); invalidate("cobros"); toast("Eliminado"); await cobros(root); }); }
   };
 }
@@ -305,5 +313,33 @@ export async function usuarios(root) {
     if (b.dataset.edit) form(users.find((x) => x.id === b.dataset.edit));
     if (b.dataset.del) confirmBox("¿Eliminar este usuario?", async () => { await api("users/" + b.dataset.del, "DELETE"); toast("Eliminado"); await usuarios(root); });
     if (b.id === "cfg") formModal({ title: "Ajustes del programa", values: S.settings, fields: [{ name: "nombre_programa", label: "Nombre del programa", required: true }, { name: "nota_minima", label: "Nota mínima para aprobar (%)", type: "number", min: 0, max: 100, step: "0.1", required: true }, { name: "precio_libro", label: "Precio estándar por libro ($)", type: "number", min: 0, step: "0.01", required: true }], onSubmit: async (v, m) => { S.settings = await api("settings", "PUT", v); m.close(); toast("Ajustes guardados"); } });
+  };
+}
+
+/* ---- Importador masivo de comprobantes (carpeta ENTRADAS_Images de AppSheet) ---- */
+async function importer(cobros, eMap) {
+  const refs = {}; cobros.forEach((c) => { if (c.imagen) refs[imgName(c.imagen)] = c; });
+  const names = Object.keys(refs);
+  const have = new Set(await api("comprobantes"));
+  const pend = names.filter((n) => !have.has(n)).length;
+  const m = modal("Importar comprobantes", `<p>Hay <b>${names.length}</b> comprobantes referenciados en los cobros; <b>${names.length - pend}</b> ya están cargados y <b>${pend}</b> faltan.</p>
+    <p style="color:var(--muted)">Selecciona las fotos de la carpeta <code>ENTRADAS_Images</code> de AppSheet (puedes elegir todas con Ctrl+A). Solo se suben las que coinciden por nombre con un cobro y aún no están cargadas.</p>
+    <div class="field"><input type="file" id="files" accept="image/*" multiple></div><div id="sum" style="margin:.5rem 0"></div><div class="actions" style="justify-content:flex-end"><button class="btn" data-close2>Cerrar</button><button class="btn primary" id="go" disabled>Subir</button></div>`);
+  $("[data-close2]", m.el).onclick = m.close;
+  let todo = [];
+  $("#files", m.el).onchange = (e) => {
+    const sel = [...e.target.files]; const match = sel.filter((f) => refs[f.name]); const nuevos = match.filter((f) => !have.has(f.name));
+    todo = nuevos;
+    $("#sum", m.el).innerHTML = `${sel.length} archivos elegidos · <b>${nuevos.length}</b> por subir · ${match.length - nuevos.length} ya cargados · ${sel.length - match.length} sin cobro asociado (se ignoran)`;
+    $("#go", m.el).disabled = !nuevos.length;
+  };
+  $("#go", m.el).onclick = async (ev) => {
+    ev.target.disabled = true; let ok = 0; const errs = [];
+    for (const [i, f] of todo.entries()) {
+      $("#sum", m.el).innerHTML = `Subiendo ${i + 1} de ${todo.length}… <progress value="${i}" max="${todo.length}" style="width:100%"></progress>`;
+      try { await uploadImage(f.name, await compressImage(f)); ok++; } catch (e) { errs.push(`${f.name}: ${e.message}`); }
+    }
+    $("#sum", m.el).innerHTML = `<b>${ok}</b> subidos${errs.length ? ` · <span class="pos">${errs.length} con error</span><ul>${errs.slice(0, 10).map((x) => `<li>${esc(x)}</li>`).join("")}</ul>` : " correctamente."}`;
+    toast(`${ok} comprobantes cargados`, errs.length > 0);
   };
 }

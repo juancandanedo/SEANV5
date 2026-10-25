@@ -66,4 +66,19 @@ r = await call("b", "POST", "/api/login", { usuario: "juancarlos", password: "ot
 const res = await Promise.all(Array.from({ length: 12 }, (_, i) => call("a", "POST", "/api/data/cobros", { fecha: "2026-10-24", estudiante_id: "PAN-002", libro: 1, debe: i + 1 })));
 assert(res.every((x) => x.s === 201)); const all = (await call("a", "GET", "/api/data/cobros")).d; assert.equal(all.filter((c) => c.fecha === "2026-10-24" && c.estudiante_id === "PAN-002").length, 12); ok("12 escrituras concurrentes sin pérdida");
 r = await call("a", "POST", "/api/logout"); r = await call("a", "GET", "/api/session"); assert.equal(r.d.user, null); ok("logout");
+// comprobantes
+const png = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==", "base64");
+const up = (who, name, type = "image/png", body = png) => h(new Request("https://x.test/api/comprobante/" + name, { method: "POST", headers: { "content-type": type, cookie: jar[who] || "" }, body }));
+await call("a", "POST", "/api/login", { usuario: "juancarlos", password: "otraclave99" });
+let rr = await up("a", "abc123.IMAGEN.1.jpg"); assert.equal(rr.status, 201);
+rr = await up("a", "mal.txt", "text/html", Buffer.from("<script>")); assert.equal(rr.status, 400);
+rr = await up("a", "../x.png"); assert([400, 404].includes(rr.status));
+rr = await up("u", "tutor.png"); assert.equal(rr.status, 403);
+rr = await up("a", "grande.png", "image/png", Buffer.alloc(5 * 1024 * 1024 + 1)); assert.equal(rr.status, 413);
+rr = await h(new Request("https://x.test/api/comprobante/abc123.IMAGEN.1.jpg", { headers: { cookie: jar.t } })); assert.equal(rr.status, 200); assert.equal(rr.headers.get("content-type"), "image/png"); assert.equal(Buffer.from(await rr.arrayBuffer()).length, png.length);
+rr = await h(new Request("https://x.test/api/comprobante/abc123.IMAGEN.1.jpg", { headers: { cookie: jar.u } })); assert.equal(rr.status, 403);
+rr = await h(new Request("https://x.test/api/comprobante/abc123.IMAGEN.1.jpg")); assert.equal(rr.status, 401);
+r = await call("t", "GET", "/api/comprobantes"); assert.deepEqual(r.d, ["abc123.IMAGEN.1.jpg"]);
+rr = await h(new Request("https://x.test/api/comprobante/abc123.IMAGEN.1.jpg", { method: "DELETE", headers: { cookie: jar.t } })); assert.equal(rr.status, 403);
+rr = await h(new Request("https://x.test/api/comprobante/abc123.IMAGEN.1.jpg", { method: "DELETE", headers: { cookie: jar.a } })); assert.equal(rr.status, 200); ok("comprobantes: subir/ver/listar/permisos");
 console.log("TODO OK");
