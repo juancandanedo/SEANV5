@@ -30,8 +30,8 @@ function localStore(dir) {
 const safe = (n) => "img_" + n.replace(/[^a-zA-Z0-9_.-]/g, "_");
 let _files;
 export function files() {
-  if (_files) return _files;
   if (process.env.LOCAL_STORE_DIR) {
+    if (_files) return _files;
     const dir = path.join(process.env.LOCAL_STORE_DIR, "files"); fs.mkdirSync(dir, { recursive: true });
     _files = {
       async put(name, buf, type) { fs.writeFileSync(path.join(dir, safe(name)), buf); fs.writeFileSync(path.join(dir, safe(name) + ".type"), type); },
@@ -40,8 +40,9 @@ export function files() {
       async list() { return fs.readdirSync(dir).filter((f) => !f.endsWith(".type")).map((f) => f.replace(/^img_/, "")); },
     };
   } else {
+    // En Netlify el token de Blobs es por invocación: nunca se cachea el store entre solicitudes.
     const st = getStore({ name: "comprobantes", consistency: "strong" });
-    _files = {
+    return {
       async put(name, buf, type) { await st.set(name, buf, { metadata: { type } }); },
       async get(name) { const r = await st.getWithMetadata(name, { type: "arrayBuffer" }); return r ? { data: Buffer.from(r.data), type: r.metadata?.type || "image/jpeg" } : null; },
       async del(name) { await st.delete(name); },
@@ -53,11 +54,9 @@ export function files() {
 
 let _store;
 export function store() {
-  if (_store) return _store;
-  _store = process.env.LOCAL_STORE_DIR
-    ? localStore(process.env.LOCAL_STORE_DIR)
-    : getStore({ name: "seminarios", consistency: "strong" });
-  return _store;
+  if (process.env.LOCAL_STORE_DIR) return (_store ||= localStore(process.env.LOCAL_STORE_DIR));
+  // Sin caché: el token de Blobs caduca y se renueva en cada invocación de la función.
+  return getStore({ name: "seminarios", consistency: "strong" });
 }
 
 export async function readKey(key, fallback = null) {
