@@ -81,4 +81,12 @@ rr = await h(new Request("https://x.test/api/comprobante/abc123.IMAGEN.1.jpg"));
 r = await call("t", "GET", "/api/comprobantes"); assert.deepEqual(r.d, ["abc123.IMAGEN.1.jpg"]);
 rr = await h(new Request("https://x.test/api/comprobante/abc123.IMAGEN.1.jpg", { method: "DELETE", headers: { cookie: jar.t } })); assert.equal(rr.status, 403);
 rr = await h(new Request("https://x.test/api/comprobante/abc123.IMAGEN.1.jpg", { method: "DELETE", headers: { cookie: jar.a } })); assert.equal(rr.status, 200); ok("comprobantes: subir/ver/listar/permisos");
+// recuperación
+r = await call("x", "POST", "/api/recovery", { usuario: "juancarlos", password: "nuevaclave1", key: "x" }); assert.equal(r.s, 403); // sin RECOVERY_KEY
+process.env.RECOVERY_KEY = "clave-secreta-123";
+r = await call("x", "POST", "/api/recovery", { usuario: "juancarlos", password: "nuevaclave1", key: "mala-mala-mala" }); assert.equal(r.s, 403);
+r = await call("x", "POST", "/api/recovery", { usuario: "noexiste", password: "nuevaclave1", key: "clave-secreta-123" }); assert.equal(r.s, 404);
+r = await call("x", "POST", "/api/recovery", { usuario: "juancarlos", password: "nuevaclave1", key: "clave-secreta-123" }); assert.equal(r.s, 200);
+r = await call("y", "POST", "/api/login", { usuario: "juancarlos", password: "nuevaclave1" }); assert.equal(r.s, 200);
+r = await call("y", "POST", "/api/login", { usuario: "juancarlos", password: "otraclave99" }); assert.equal(r.s, 401); ok("recuperación de contraseña");
 console.log("TODO OK");

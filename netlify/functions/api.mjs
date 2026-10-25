@@ -165,10 +165,27 @@ export default async function handler(req) {
       const v = validateUser({ ...body, rol: "admin" }, true);
       const { salt, hash } = hashPassword(body.password);
       const admin = { id: newId(), ...v, salt, hash };
-      for (const c of COLS) await store().setJSON("col_" + c, seed[c]);
-      await store().setJSON("settings", DEFAULT_SETTINGS);
+      for (const c of COLS) await store().setJSON("col_" + c, seed[c], { onlyIfNew: true }); // nunca pisa datos existentes
+      await store().setJSON("settings", DEFAULT_SETTINGS, { onlyIfNew: true });
       await store().setJSON("users", [admin]);
       return json({ user: pubUser(admin) }, 200, setCookie(await sign({ uid: admin.id }), 604800));
+    }
+    // Recuperación: requiere la variable de entorno RECOVERY_KEY definida en Netlify por el dueño del sitio.
+    if (parts[0] === "recovery" && method === "POST") {
+      const key = process.env.RECOVERY_KEY;
+      await new Promise((ok) => setTimeout(ok, 500));
+      if (!key || key.length < 12) throw fail(403, "Recuperación no habilitada: define RECOVERY_KEY (mín. 12 caracteres) en Netlify");
+      const a = Buffer.from(String(body.key || "")), b = Buffer.from(key);
+      if (a.length !== b.length || !crypto.timingSafeEqual(a, b)) throw fail(403, "Clave de recuperación incorrecta");
+      if (!body.password || String(body.password).length < 8) throw fail(400, "La contraseña debe tener al menos 8 caracteres");
+      const usuario = String(body.usuario || "").toLowerCase().trim();
+      const { salt, hash } = hashPassword(String(body.password));
+      await mutate("users", (arr) => {
+        const i = arr.findIndex((x) => x.usuario === usuario);
+        if (i < 0) throw fail(404, "Usuario no encontrado");
+        return { value: arr.map((x, j) => (j === i ? { ...x, salt, hash, activo: true } : x)), result: true };
+      }, []);
+      return json({ ok: true });
     }
     if (parts[0] === "login" && method === "POST") {
       const usuario = String(body.usuario || "").toLowerCase().trim();

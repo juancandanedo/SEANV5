@@ -37,3 +37,8 @@ Pruebas: `node tests/api.test.mjs`
 - Al registrar/editar un pago se puede adjuntar una foto; se reduce a 1600 px (JPEG) y se guarda en Netlify Blobs (store `comprobantes`).
 - En *Cobros*, el botón 📎 abre el comprobante. Solo Administrador y Tesorería pueden verlos.
 - **Importar los 323 comprobantes existentes:** *Cobros → Importar comprobantes* y elige las fotos de la carpeta `ENTRADAS_Images` de AppSheet (Ctrl+A). Se asocian por nombre de archivo (ej. `137e716e.IMAGEN.142316.jpg`).
+
+## Recuperar contraseña de administrador
+1. En Netlify: *Site configuration → Environment variables* → agrega `RECOVERY_KEY` con un valor largo (≥ 12 caracteres). Haz un nuevo deploy.
+2. En la pantalla de login, «¿Olvidaste tu contraseña?» → usuario, nueva contraseña y la clave.
+3. Al terminar, **borra** la variable `RECOVERY_KEY` (deshabilita la recuperación).

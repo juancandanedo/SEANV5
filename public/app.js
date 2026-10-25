@@ -17,7 +17,8 @@ function authScreen(setup) {
   ${setup ? '<div class="field"><label>Nombre</label><input name="nombre" required autocomplete="name"></div>' : ""}
   <div class="field"><label>Usuario</label><input name="usuario" required autocomplete="username" autocapitalize="off"></div>
   <div class="field"><label>Contraseña</label><input name="password" type="password" required autocomplete="${setup ? "new-password" : "current-password"}" ${setup ? 'minlength="8"' : ""}>${setup ? "<small>Mínimo 8 caracteres</small>" : ""}</div>
-  <button class="btn primary" style="width:100%">${setup ? "Crear administrador y cargar datos" : "Entrar"}</button></form></div>`;
+  <button class="btn primary" style="width:100%">${setup ? "Crear administrador y cargar datos" : "Entrar"}</button>${setup ? "" : '<p style="margin:.9rem 0 0;text-align:center"><a href="#" id="rec">¿Olvidaste tu contraseña?</a></p>'}</form></div>`;
+  const rec = $("#rec"); if (rec) rec.onclick = (e) => { e.preventDefault(); formModal({ title: "Recuperar acceso", fields: [{ name: "usuario", label: "Usuario", required: true }, { name: "password", label: "Nueva contraseña", type: "password", required: true, autocomplete: "new-password", hint: "Mínimo 8 caracteres" }, { name: "key", label: "Clave de recuperación", type: "password", required: true, hint: "La variable RECOVERY_KEY configurada en Netlify" }], onSubmit: async (v, m) => { await api("recovery", "POST", v); m.close(); toast("Contraseña restablecida. Ya puedes entrar."); } }); };
   const form = $("#f"); $("input", form).focus();
   form.onsubmit = async (e) => {
     e.preventDefault();
