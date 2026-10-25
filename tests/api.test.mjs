@@ -110,4 +110,26 @@ r = await call("u", "GET", "/api/data/grupos"); assert(!r.d.some((g) => g.id ===
 r = await call("a", "DELETE", "/api/data/salones/101"); assert.equal(r.s, 409);
 r = await call("a", "DELETE", "/api/data/cursos/" + iid); assert.equal(r.s, 200);
 r = await call("a", "DELETE", "/api/data/grupos/" + gid); assert.equal(r.s, 200); ok("baja de grupo");
+// asistencia semanal
+await call("u", "POST", "/api/login", { usuario: "tutor106", password: "tutor12345" });
+const G = "2025N2L3-106-1"; const cs = (await call("a", "GET", "/api/data/cursos")).d.filter((c) => c.grupo === G);
+assert(cs.length >= 2);
+const body = (sem, a, p) => ({ grupo: G, semana: sem, items: cs.map((c, i) => ({ curso_reg_id: c.id, a: i ? a : "P", p: i ? p : "C" })) });
+r = await call("u", "POST", "/api/semana", body(1, "T", "I")); assert.equal(r.s, 200); assert.equal(r.d.length, cs.length); assert.deepEqual(r.d.find((x) => x.curso_reg_id === cs[1].id).semanas["1"], { a: "T", p: "I" });
+r = await call("a", "POST", "/api/semana", body(2, "F", "N")); assert.equal(r.s, 200); assert.equal(Object.keys(r.d[0].semanas).length, 2); ok("registro semanal");
+r = await call("u", "POST", "/api/semana", body(13, "P", "C")); assert.equal(r.s, 400);
+r = await call("u", "POST", "/api/semana", body(3, "X", "C")); assert.equal(r.s, 400);
+r = await call("u", "POST", "/api/semana", { grupo: "2025N2L3-105-1", semana: 1, items: [{ curso_reg_id: cs[0].id, a: "P" }] }); assert.equal(r.s, 403);
+r = await call("a", "POST", "/api/semana", { grupo: "2025N2L3-105-1", semana: 1, items: [{ curso_reg_id: cs[0].id, a: "P" }] }); assert.equal(r.s, 400); ok("validaciones y alcance del tutor");
+r = await call("u", "GET", "/api/data/asistencia"); assert(r.d.length === cs.length && r.d.every((x) => x.grupo === G));
+r = await call("t", "GET", "/api/data/asistencia"); assert.equal(r.s, 403);
+r = await call("u", "POST", "/api/data/asistencia", { curso_reg_id: cs[0].id }); assert.equal(r.s, 403);
+r = await call("a", "POST", "/api/data/asistencia", { curso_reg_id: cs[0].id }); assert.equal(r.s, 403); ok("lectura y escritura restringidas");
+r = await call("u", "POST", "/api/semana", { grupo: G, semana: 2, items: cs.map((c) => ({ curso_reg_id: c.id })) }); assert(r.d.every((x) => !x.semanas["2"])); ok("borrar semana");
+// cascada
+r = await call("a", "POST", "/api/data/grupos", { anio: 2026, curso: "N2L5", tutor_id: "PAN-106" }); const g2 = r.d.id;
+r = await call("a", "POST", "/api/data/cursos", { estudiante_id: "PAN-010", grupo: g2 }); const i2 = r.d.id;
+await call("a", "POST", "/api/semana", { grupo: g2, semana: 1, items: [{ curso_reg_id: i2, a: "P", p: "C" }] });
+await call("a", "DELETE", "/api/data/cursos/" + i2);
+r = await call("a", "GET", "/api/data/asistencia"); assert(!r.d.some((x) => x.curso_reg_id === i2)); await call("a", "DELETE", "/api/data/grupos/" + g2); ok("quitar inscripción borra su asistencia");
 console.log("TODO OK");

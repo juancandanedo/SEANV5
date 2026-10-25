@@ -45,3 +45,9 @@ Pruebas: `node tests/api.test.mjs`
 
 ## Grupos
 Módulo *Grupos*: cada grupo une **año + libro + tutor + salón + horario + estado** y lista sus estudiantes inscritos (el admin inscribe/quita). Cambiar tutor, libro o año de un grupo se propaga a todas sus inscripciones. Los grupos existentes se crean automáticamente a partir de tus inscripciones (el salón queda «Sin salón» hasta asignarlo).
+
+## Asistencia y pruebas (Manual del Tutor, pág. 54)
+- *Asistencia → Registrar semana*: por grupo y semana (1-12) el tutor marca **asistencia** (puntual / tarde / falta) y **pruebas** (correcta / incompleta / no hecha).
+- Cálculo: asistencia = 100 − 5 por tarde − 10 por falta; pruebas = 100 − 5 por incompleta − 10 por no hecha; examen final = 100 − 1 por cada error; **total = promedio de las tres**. Aprueba con **≥ 80%** (Usuarios → Ajustes → nota mínima).
+- *Registro del grupo y notas finales*: matriz equivalente al «Registro» del manual, con examen (por errores), total y resultado; exportable a Excel e imprimible.
+- Un tutor solo registra en sus propios grupos. Quitar a un estudiante de un grupo borra su asistencia.

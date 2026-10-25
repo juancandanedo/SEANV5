@@ -123,3 +123,18 @@ tbody tr:hover{background:color-mix(in srgb,var(--accent) 6%,transparent)}
 .filters .dl{display:flex;align-items:center;gap:.4rem;color:var(--muted);font-size:.85rem;font-weight:600;flex:0 1 auto;min-width:0}
 .filters .dl input{min-width:130px}
 .btn{text-decoration:none;display:inline-block}
+
+/* asistencia */
+.sg{display:inline-flex;border:1px solid var(--line);border-radius:9px;overflow:hidden}
+.sg button{border:0;border-right:1px solid var(--line);background:var(--panel);padding:.4rem .7rem;cursor:pointer;font-size:.86rem;font-weight:600;color:var(--muted)}
+.sg button:last-child{border-right:0}
+.sg button.on.g{background:var(--ok-bg);color:var(--ok)}
+.sg button.on.y{background:var(--warn-bg);color:var(--warn)}
+.sg button.on.r{background:var(--bad-bg);color:var(--bad)}
+.legend{display:flex;flex-wrap:wrap;gap:.4rem 1.2rem;color:var(--muted);font-size:.85rem;margin:.2rem 0 .9rem}
+.mx td,.mx th{padding:.4rem .35rem;text-align:center}
+.mx td:first-child,.mx th:first-child{text-align:left;padding-left:.75rem;position:sticky;left:0;background:var(--panel);z-index:1}
+.mx th:first-child{background:color-mix(in srgb,var(--panel) 92%,var(--ink));z-index:2}
+.cg{color:var(--ok);font-weight:700}.cy{color:var(--warn);font-weight:700}.cr{color:var(--bad);font-weight:700}.cn{color:var(--muted)}
+.mx .pair{white-space:nowrap;letter-spacing:.05em}
+.mx input{width:64px;padding:.25rem .35rem}

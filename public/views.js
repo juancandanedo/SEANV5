@@ -1,4 +1,4 @@
-import { S, esc, $, $$, api, col, cols, idx, invalidate, money, fdate, today, pct, norm, libroLabel, can, toast, modal, formModal, confirmBox, table, bindTables, exportXlsx, imgName, imgUrl, newImgName, compressImage, uploadImage, saldoPorEstudiante, saldoPill, notaPct, aprobado, resultPill } from "./lib.js";
+import { S, esc, $, $$, api, col, cols, idx, invalidate, money, fdate, today, pct, norm, libroLabel, can, toast, modal, formModal, confirmBox, table, bindTables, exportXlsx, imgName, imgUrl, newImgName, compressImage, uploadImage, saldoPorEstudiante, calcRegistro, saldoPill, notaPct, aprobado, resultPill } from "./lib.js";
 
 const head = (title, sub = "", actions = "") => `<div class="head"><div><h1>${esc(title)}</h1>${sub ? `<div class="sub">${sub}</div>` : ""}</div><div class="actions">${actions}</div></div>`;
 const kpi = (l, v, n = "") => `<div class="card kpi"><div class="l">${esc(l)}</div><div class="v">${v}</div><div class="n">${n}</div></div>`;
@@ -422,4 +422,84 @@ export async function grupos(root, param) {
     if (b.dataset.del) confirmBox(`¿Eliminar el grupo ${b.dataset.del}?`, async () => { await api("data/grupos/" + encodeURIComponent(b.dataset.del), "DELETE"); toast("Grupo eliminado"); await reload(); });
   };
   if (param) detalle(param);
+}
+
+/* ======================= ASISTENCIA Y PRUEBAS ======================= */
+const A_OPT = [["P", "✓ Puntual", "g"], ["T", "✗ Tarde", "y"], ["F", "Falta", "r"]];
+const P_OPT = [["C", "✓ Correcta", "g"], ["I", "✗ Incompleta", "y"], ["N", "No hecha", "r"]];
+const symA = { P: '<span class="cg">✓</span>', T: '<span class="cy">✗</span>', F: '<span class="cr">○</span>' };
+const symP = { C: '<span class="cg">✓</span>', I: '<span class="cy">✗</span>', N: '<span class="cr">○</span>' };
+const sg = (key, id, cur, opts) => `<div class="sg" data-id="${esc(id)}" data-k="${key}">${opts.map(([v, t, c]) => `<button type="button" data-v="${v}" class="${c} ${cur === v ? "on" : ""}">${t}</button>`).join("")}</div>`;
+const nf1 = (n) => (n == null ? "—" : (Math.round(n * 10) / 10).toFixed(1) + "%");
+
+export async function asistencia(root) {
+  const d = await cols("grupos", "cursos", "tutores", "notas", "asistencia", "estudiantes", "niveles");
+  const tMap = idx(d.tutores), eMap = idx(d.estudiantes), nByC = idx(d.notas, "curso_reg_id");
+  const gl = [...d.grupos].sort((a, b) => (a.estado === b.estado ? 0 : a.estado === "ACTIVO" ? -1 : 1) || b.anio - a.anio || a.id.localeCompare(b.id));
+  if (!gl.length) { root.innerHTML = head("Asistencia") + '<div class="card empty">No tienes grupos asignados.</div>'; return; }
+  const f = { grupo: S.asisGrupo && gl.some((g) => g.id === S.asisGrupo) ? S.asisGrupo : gl[0].id, tab: "semana", semana: null };
+  const insc = () => d.cursos.filter((c) => c.grupo === f.grupo).sort((a, b) => (eMap[a.estudiante_id]?.nombre || "").localeCompare(eMap[b.estudiante_id]?.nombre || ""));
+  const rec = (cid) => d.asistencia.find((r) => r.curso_reg_id === cid);
+  const examPct = (cid) => (nByC[cid] ? notaPct(nByC[cid]) * 100 : null);
+  const g0 = () => d.grupos.find((g) => g.id === f.grupo);
+  const defaultWeek = () => { const rs = d.asistencia.filter((r) => r.grupo === f.grupo); for (let w = 1; w <= 12; w++) if (!rs.some((r) => r.semanas[w])) return w; return 12; };
+
+  const draw = () => {
+    f.semana ||= defaultWeek(); S.asisGrupo = f.grupo;
+    const g = g0(), rows = insc();
+    $$(".tabs button", root).forEach((b) => b.classList.toggle("on", b.dataset.tab === f.tab));
+    const pane = $("#pane", root);
+    if (f.tab === "semana") {
+      const sem = (c) => rec(c.id)?.semanas[f.semana] || {};
+      pane.innerHTML = `<div class="legend"><span><b>Asistencia:</b> puntual 0 · tarde −5 · falta −10</span><span><b>Pruebas y trabajos:</b> correcta 0 · incompleta −5 · no hecha −10</span></div>
+        <div class="filters"><select id="semana" style="max-width:200px">${Array.from({ length: 12 }, (_, i) => `<option value="${i + 1}" ${i + 1 === f.semana ? "selected" : ""}>Semana ${i + 1}${d.asistencia.some((r) => r.grupo === f.grupo && r.semanas[i + 1]) ? " ✔" : ""}</option>`).join("")}</select><button class="btn" id="allP" style="flex:0 0 auto">Todos puntuales</button><button class="btn" id="allC" style="flex:0 0 auto">Todas las pruebas correctas</button></div>
+        ${rows.length ? `<div class="tablewrap"><table><thead><tr><th class="nosort">Estudiante</th><th class="nosort">Asistencia (A)</th><th class="nosort">Pruebas (P)</th></tr></thead><tbody>${rows.map((c) => { const s = sem(c); return `<tr data-c="${esc(c.id)}" data-a="${s.a || ""}" data-p="${s.p || ""}"><td>${esc(eMap[c.estudiante_id]?.nombre || c.estudiante_id)}</td><td>${sg("a", c.id, s.a, A_OPT)}</td><td>${sg("p", c.id, s.p, P_OPT)}</td></tr>`; }).join("")}</tbody></table></div>
+        <div class="actions" style="justify-content:flex-end;margin-top:.8rem"><button class="btn primary" id="save">Guardar semana ${f.semana}</button></div>` : '<div class="card empty">Este grupo no tiene estudiantes inscritos.</div>'}`;
+      $("#semana", root).onchange = (e) => { f.semana = +e.target.value; draw(); };
+      const setAll = (k, v) => $$("tr[data-c]", root).forEach((tr) => { tr.dataset[k] = v; $$(`.sg[data-k=${k}] button`, tr).forEach((b) => b.classList.toggle("on", b.dataset.v === v)); });
+      $("#allP", root)?.addEventListener("click", () => setAll("a", "P")); $("#allC", root)?.addEventListener("click", () => setAll("p", "C"));
+      $("#save", root)?.addEventListener("click", async (ev) => {
+        ev.target.disabled = true;
+        try {
+          const items = $$("tr[data-c]", root).map((tr) => ({ curso_reg_id: tr.dataset.c, a: tr.dataset.a || null, p: tr.dataset.p || null }));
+          const saved = await api("semana", "POST", { grupo: f.grupo, semana: f.semana, items });
+          d.asistencia = [...d.asistencia.filter((r) => r.grupo !== f.grupo), ...saved]; invalidate("asistencia");
+          toast(`Semana ${f.semana} guardada`); if (f.semana < 12) f.semana++; draw();
+        } catch (e) { toast(e.message, true); ev.target.disabled = false; }
+      });
+    } else {
+      const calc = rows.map((c) => ({ c, r: calcRegistro(rec(c.id), examPct(c.id)) }));
+      pane.innerHTML = `<div class="legend"><span><span class="cg">✓</span> bien</span><span><span class="cy">✗</span> tarde / incompleta</span><span><span class="cr">○</span> falta / no hecha</span><span>Cada semana: <b>asistencia · prueba</b>. Total = (asistencia + pruebas + examen) ÷ 3. Aprueba con ≥ ${S.settings.nota_minima}%.</span></div>
+        <div class="actions" style="margin-bottom:.8rem"><button class="btn" id="exp">Exportar Excel</button><button class="btn" id="prt">Imprimir</button></div>
+        <div class="tablewrap"><table class="mx"><thead><tr><th class="nosort">Estudiante</th>${Array.from({ length: 12 }, (_, i) => `<th class="nosort">${i + 1}</th>`).join("")}<th class="nosort">Asist.</th><th class="nosort">Pruebas</th><th class="nosort">Examen</th><th class="nosort noprint">Errores examen</th><th class="nosort">Total</th><th class="nosort">Resultado</th></tr></thead><tbody>${calc.map(({ c, r }) => { const rc = rec(c.id); return `<tr data-c="${esc(c.id)}"><td>${esc(eMap[c.estudiante_id]?.nombre || c.estudiante_id)}</td>${Array.from({ length: 12 }, (_, i) => { const w = rc?.semanas[i + 1]; return `<td class="pair">${w ? (w.a ? symA[w.a] : '<span class="cn">·</span>') + (w.p ? symP[w.p] : '<span class="cn">·</span>') : '<span class="cn">··</span>'}</td>`; }).join("")}<td>${nf1(r.asist)}</td><td>${nf1(r.pru)}</td><td>${nf1(r.examen)}</td><td class="noprint"><input type="number" min="0" max="100" step="1" placeholder="${nByC[c.id] ? "" : "—"}" aria-label="Errores del examen"></td><td><b>${nf1(r.total)}</b></td><td>${r.total == null ? '<span class="pill mute">Incompleto</span>' : r.total >= S.settings.nota_minima ? '<span class="pill ok">Aprobado</span>' : '<span class="pill bad">Reprobado</span>'}</td></tr>`; }).join("")}</tbody></table></div>
+        <p class="sub" style="color:var(--muted);margin-top:.6rem">Examen final: escribe los <b>errores</b> (100 menos 1 punto por cada pregunta o parte incorrecta) y pulsa Guardar. Si ya había una nota en el módulo Notas, se muestra aquí como examen.</p>
+        <div class="actions noprint" style="justify-content:flex-end;margin-top:.6rem"><button class="btn primary" id="saveEx">Guardar exámenes</button></div>`;
+      $("#prt", root).onclick = () => window.print();
+      $("#exp", root).onclick = () => exportXlsx("registro_" + f.grupo, calc.map(({ c, r }) => { const rc = rec(c.id); const o = { Estudiante: eMap[c.estudiante_id]?.nombre }; for (let i = 1; i <= 12; i++) { const w = rc?.semanas[i]; o[`S${i} Asist`] = w?.a || ""; o[`S${i} Prueba`] = w?.p || ""; } return { ...o, "Asistencia %": r.asist ?? "", "Pruebas %": r.pru ?? "", "Examen %": r.examen == null ? "" : Math.round(r.examen * 10) / 10, "Total %": r.total == null ? "" : Math.round(r.total * 10) / 10, Resultado: r.total == null ? "Incompleto" : r.total >= S.settings.nota_minima ? "Aprobado" : "Reprobado" }; }), "Registro");
+      $("#saveEx", root).onclick = async (ev) => {
+        const todo = $$("tr[data-c]", root).map((tr) => ({ cid: tr.dataset.c, v: $("input", tr).value })).filter((x) => x.v !== "");
+        if (!todo.length) return toast("Escribe los errores de al menos un estudiante");
+        ev.target.disabled = true; let ok = 0; const errs = [];
+        for (const { cid, v } of todo) {
+          try { const err = Math.min(100, Math.max(0, Number(v))); const body = { curso_reg_id: cid, nota: 100 - err, total: 100 }; const ex = nByC[cid]; ex ? await api("data/notas/" + ex.id, "PUT", body) : await api("data/notas", "POST", { ...body, modalidad: "" }); ok++; } catch (e) { errs.push(e.message); }
+        }
+        toast(`${ok} examen(es) guardado(s)` + (errs.length ? ` · ${errs.length} con error` : ""), errs.length > 0);
+        S.asisTab = "registro"; invalidate("notas"); await asistencia(root);
+      };
+    }
+  };
+  root.innerHTML = head("Asistencia y pruebas", "Registro semanal según el Manual del Tutor") +
+    `<div class="filters"><select id="grupo" class="grow" style="max-width:520px">${gl.map((g) => `<option value="${esc(g.id)}" ${g.id === f.grupo ? "selected" : ""}>${esc(g.id)} · ${esc(tMap[g.tutor_id]?.nombre || g.tutor_id)}${g.estado === "ACTIVO" ? "" : " (finalizado)"}</option>`).join("")}</select></div>
+     <div class="tabs"><button data-tab="semana">Registrar semana</button><button data-tab="registro">Registro del grupo y notas finales</button></div><div id="pane"></div>`;
+  if (S.asisTab) { f.tab = S.asisTab; S.asisTab = null; }
+  $("#grupo", root).onchange = (e) => { f.grupo = e.target.value; f.semana = null; draw(); };
+  $$(".tabs button", root).forEach((b) => (b.onclick = () => { f.tab = b.dataset.tab; draw(); }));
+  if (!root._sgBound) root.addEventListener("click", (ev) => {
+    const b = ev.target.closest(".sg button"); if (!b) return;
+    const box = b.parentElement, tr = b.closest("tr"), k = box.dataset.k, same = b.classList.contains("on");
+    $$("button", box).forEach((x) => x.classList.remove("on"));
+    if (same) tr.dataset[k] = ""; else { b.classList.add("on"); tr.dataset[k] = b.dataset.v; }
+  });
+  root._sgBound = true;
+  draw();
 }

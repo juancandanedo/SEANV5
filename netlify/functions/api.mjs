@@ -5,15 +5,15 @@ import seed from "../../seed/seed.json" with { type: "json" };
 
 export const config = { path: "/api/*" };
 
-const COLS = ["estudiantes", "tutores", "salones", "niveles", "tipos_pago", "grupos", "cursos", "notas", "cobros"];
+const COLS = ["estudiantes", "tutores", "salones", "niveles", "tipos_pago", "grupos", "cursos", "notas", "asistencia", "cobros"];
 const ROLES = ["admin", "tesoreria", "tutor"];
 // Permisos por rol: lectura / escritura
 const PERM = {
   admin: { read: COLS, write: COLS },
   tesoreria: { read: ["estudiantes", "tutores", "salones", "niveles", "tipos_pago", "grupos", "cursos", "cobros"], write: ["cobros"] },
-  tutor: { read: ["estudiantes", "tutores", "salones", "niveles", "tipos_pago", "grupos", "cursos", "notas"], write: ["notas"] },
+  tutor: { read: ["estudiantes", "tutores", "salones", "niveles", "tipos_pago", "grupos", "cursos", "notas", "asistencia"], write: ["notas"] },
 };
-const DEFAULT_SETTINGS = { nota_minima: 70, precio_libro: 25, nombre_programa: "Seminarios" };
+const DEFAULT_SETTINGS = { nota_minima: 80, precio_libro: 25, nombre_programa: "Seminarios" };
 
 const json = (data, status = 200, headers = {}) =>
   new Response(JSON.stringify(data), { status, headers: { "content-type": "application/json; charset=utf-8", "cache-control": "no-store", ...headers } });
@@ -55,7 +55,7 @@ async function listFor(user, col) {
     if (col === "cursos") rows = sc.cursos;
     else if (col === "grupos") rows = rows.filter((g) => g.tutor_id === user.tutor_id);
     else if (col === "estudiantes") rows = rows.filter((e) => sc.estIds.has(e.id));
-    else if (col === "notas") rows = rows.filter((n) => sc.cursoIds.has(n.curso_reg_id));
+    else if (col === "notas" || col === "asistencia") rows = rows.filter((n) => sc.cursoIds.has(n.curso_reg_id));
   }
   return rows;
 }
@@ -194,7 +194,7 @@ export default async function handler(req) {
       const v = validateUser({ ...body, rol: "admin" }, true);
       const { salt, hash } = hashPassword(body.password);
       const admin = { id: newId(), ...v, salt, hash };
-      for (const c of COLS) await store().setJSON("col_" + c, seed[c], { onlyIfNew: true }); // nunca pisa datos existentes
+      for (const c of COLS) await store().setJSON("col_" + c, seed[c] ?? [], { onlyIfNew: true }); // nunca pisa datos existentes
       await store().setJSON("settings", DEFAULT_SETTINGS, { onlyIfNew: true });
       await store().setJSON("users", [admin]);
       return json({ user: pubUser(admin) }, 200, setCookie(await sign({ uid: admin.id }), 604800));
@@ -311,6 +311,40 @@ export default async function handler(req) {
       }
     }
 
+    // Registro semanal de asistencia y pruebas (Manual del Tutor: A = asistencia, P = pruebas)
+    if (parts[0] === "semana" && method === "POST") {
+      if (!["admin", "tutor"].includes(user.rol)) throw fail(403, "Sin permiso");
+      const semana = Number(body.semana);
+      if (!Number.isInteger(semana) || semana < 1 || semana > 12) throw fail(400, "La semana debe ser un número de 1 a 12");
+      const grupo = req_(body.grupo, "Grupo");
+      const g = (await getCol("grupos")).find((x) => x.id === grupo);
+      if (!g) throw fail(400, "El grupo no existe");
+      if (user.rol === "tutor" && g.tutor_id !== user.tutor_id) throw fail(403, "Ese grupo no es tuyo");
+      const items = Array.isArray(body.items) ? body.items : [];
+      if (!items.length || items.length > 200) throw fail(400, "Sin estudiantes que guardar");
+      const cursos = (await getCol("cursos")).filter((c) => c.grupo === grupo);
+      const cMap = Object.fromEntries(cursos.map((c) => [c.id, c]));
+      const clean = items.map((it) => {
+        const c = cMap[it.curso_reg_id]; if (!c) throw fail(400, "Un estudiante no pertenece a este grupo");
+        const a = it.a || null, p = it.p || null;
+        if (a && !["P", "T", "F"].includes(a)) throw fail(400, "Asistencia inválida (P, T o F)");
+        if (p && !["C", "I", "N"].includes(p)) throw fail(400, "Prueba inválida (C, I o N)");
+        return { c, a, p };
+      });
+      const saved = await mutate("col_asistencia", (arr) => {
+        const out = [...arr];
+        for (const { c, a, p } of clean) {
+          let i = out.findIndex((r) => r.curso_reg_id === c.id);
+          if (i < 0) { out.push({ id: newId(), curso_reg_id: c.id, estudiante_id: c.estudiante_id, grupo, semanas: {} }); i = out.length - 1; }
+          const semanas = { ...out[i].semanas };
+          if (a || p) semanas[semana] = { a, p }; else delete semanas[semana];
+          out[i] = { ...out[i], semanas };
+        }
+        return { value: out, result: out.filter((r) => r.grupo === grupo) };
+      }, []);
+      return json(saved);
+    }
+
     if (parts[0] === "data") {
       const col = parts[1];
       if (!COLS.includes(col)) throw fail(404, "Colección desconocida");
@@ -319,6 +353,7 @@ export default async function handler(req) {
         if (!perm.read.includes(col)) throw fail(403, "Sin permiso");
         return json(await listFor(user, col));
       }
+      if (col === "asistencia") throw fail(403, "La asistencia se registra por semana desde el módulo Asistencia");
       if (!perm.write.includes(col)) throw fail(403, "Sin permiso para modificar " + col);
       const key = "col_" + col;
       if (col === "grupos") await ensureGrupos();
@@ -370,6 +405,7 @@ export default async function handler(req) {
       }
       if (method === "DELETE") {
         await checkDelete(col, id);
+        if (col === "cursos") await mutate("col_asistencia", (arr) => ({ value: arr.filter((a) => a.curso_reg_id !== id), result: true }), []);
         await mutate(key, async (arr) => {
           const r = arr.find((x) => x.id === id);
           if (!r) throw fail(404, "Registro no encontrado");

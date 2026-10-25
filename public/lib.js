@@ -172,3 +172,17 @@ export async function uploadImage(name, blob) {
   const r = await fetch("/api/comprobante/" + encodeURIComponent(name), { method: "POST", headers: { "content-type": blob.type || "image/jpeg" }, body: blob, credentials: "same-origin" });
   if (!r.ok) { let m = "Error al subir la imagen"; try { m = (await r.json()).error || m; } catch {} throw new Error(m); }
 }
+
+// ---------- Registro de asistencia y pruebas (Manual del Tutor, pág. 54) ----------
+// Asistencia: P puntual (0), T tarde (-5), F falta (-10).  Pruebas: C correcta (0), I incompleta (-5), N no hecha (-10).
+const DESC_A = { P: 0, T: 5, F: 10 }, DESC_P = { C: 0, I: 5, N: 10 };
+export function calcRegistro(rec, examenPct = null) {
+  let a = 100, p = 100, nA = 0, nP = 0;
+  for (const w of Object.values(rec?.semanas || {})) {
+    if (w.a) { nA++; a -= DESC_A[w.a] ?? 0; }
+    if (w.p) { nP++; p -= DESC_P[w.p] ?? 0; }
+  }
+  a = nA ? Math.max(0, a) : null; p = nP ? Math.max(0, p) : null;
+  const total = a != null && p != null && examenPct != null ? (a + p + examenPct) / 3 : null;
+  return { asist: a, pru: p, examen: examenPct, total, nA, nP };
+}

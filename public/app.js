@@ -7,6 +7,7 @@ const ROUTES = {
   estudiantes: { t: "Estudiantes", i: "☺", roles: ["admin", "tesoreria", "tutor"], fn: V.estudiantes },
   grupos: { t: "Grupos", i: "▦", roles: ["admin", "tesoreria", "tutor"], fn: V.grupos },
   cobros: { t: "Cobros", i: "$", roles: ["admin", "tesoreria"], fn: V.cobros },
+  asistencia: { t: "Asistencia", i: "✔", roles: ["admin", "tutor"], fn: V.asistencia },
   notas: { t: "Notas", i: "✎", roles: ["admin", "tutor"], fn: V.notas },
   reportes: { t: "Reportes", i: "▤", roles: ["admin", "tesoreria", "tutor"], fn: V.reportes },
   catalogos: { t: "Catálogos", i: "☰", roles: ["admin"], fn: V.catalogos },
