@@ -1,0 +1,14 @@
+{
+  "name": "seminarios-app",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Control de cobros y notas de los seminarios",
+  "scripts": {
+    "dev": "netlify dev",
+    "seed": "python3 tools/build_seed.py"
+  },
+  "dependencies": {
+    "@netlify/blobs": "^11.1.6"
+  }
+}
