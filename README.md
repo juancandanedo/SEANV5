@@ -42,3 +42,6 @@ Pruebas: `node tests/api.test.mjs`
 1. En Netlify: *Site configuration → Environment variables* → agrega `RECOVERY_KEY` con un valor largo (≥ 12 caracteres). Haz un nuevo deploy.
 2. En la pantalla de login, «¿Olvidaste tu contraseña?» → usuario, nueva contraseña y la clave.
 3. Al terminar, **borra** la variable `RECOVERY_KEY` (deshabilita la recuperación).
+
+## Grupos
+Módulo *Grupos*: cada grupo une **año + libro + tutor + salón + horario + estado** y lista sus estudiantes inscritos (el admin inscribe/quita). Cambiar tutor, libro o año de un grupo se propaga a todas sus inscripciones. Los grupos existentes se crean automáticamente a partir de tus inscripciones (el salón queda «Sin salón» hasta asignarlo).

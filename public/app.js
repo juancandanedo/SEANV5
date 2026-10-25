@@ -5,6 +5,7 @@ const app = $("#app");
 const ROUTES = {
   inicio: { t: "Inicio", i: "◧", roles: ["admin", "tesoreria", "tutor"], fn: V.dashboard },
   estudiantes: { t: "Estudiantes", i: "☺", roles: ["admin", "tesoreria", "tutor"], fn: V.estudiantes },
+  grupos: { t: "Grupos", i: "▦", roles: ["admin", "tesoreria", "tutor"], fn: V.grupos },
   cobros: { t: "Cobros", i: "$", roles: ["admin", "tesoreria"], fn: V.cobros },
   notas: { t: "Notas", i: "✎", roles: ["admin", "tutor"], fn: V.notas },
   reportes: { t: "Reportes", i: "▤", roles: ["admin", "tesoreria", "tutor"], fn: V.reportes },

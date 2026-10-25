@@ -122,3 +122,4 @@ tbody tr:hover{background:color-mix(in srgb,var(--accent) 6%,transparent)}
 
 .filters .dl{display:flex;align-items:center;gap:.4rem;color:var(--muted);font-size:.85rem;font-weight:600;flex:0 1 auto;min-width:0}
 .filters .dl input{min-width:130px}
+.btn{text-decoration:none;display:inline-block}

@@ -5,13 +5,13 @@ import seed from "../../seed/seed.json" with { type: "json" };
 
 export const config = { path: "/api/*" };
 
-const COLS = ["estudiantes", "tutores", "salones", "niveles", "tipos_pago", "cursos", "notas", "cobros"];
+const COLS = ["estudiantes", "tutores", "salones", "niveles", "tipos_pago", "grupos", "cursos", "notas", "cobros"];
 const ROLES = ["admin", "tesoreria", "tutor"];
 // Permisos por rol: lectura / escritura
 const PERM = {
   admin: { read: COLS, write: COLS },
-  tesoreria: { read: ["estudiantes", "tutores", "salones", "niveles", "tipos_pago", "cursos", "cobros"], write: ["cobros"] },
-  tutor: { read: ["estudiantes", "tutores", "salones", "niveles", "tipos_pago", "cursos", "notas"], write: ["notas"] },
+  tesoreria: { read: ["estudiantes", "tutores", "salones", "niveles", "tipos_pago", "grupos", "cursos", "cobros"], write: ["cobros"] },
+  tutor: { read: ["estudiantes", "tutores", "salones", "niveles", "tipos_pago", "grupos", "cursos", "notas"], write: ["notas"] },
 };
 const DEFAULT_SETTINGS = { nota_minima: 70, precio_libro: 25, nombre_programa: "Seminarios" };
 
@@ -24,7 +24,17 @@ const str = (v) => (v === undefined || v === null || String(v).trim() === "" ? n
 const req_ = (v, name) => { const s = str(v); if (!s) throw fail(400, `${name} es obligatorio`); return s; };
 
 // ---------- acceso a colecciones ----------
-const getCol = (c) => readKey("col_" + c, []);
+const getCol = (c) => (c === "grupos" ? ensureGrupos() : readKey("col_" + c, []));
+// Migración perezosa: si la colección "grupos" no existe (instalaciones previas), se deduce de las inscripciones.
+async function ensureGrupos() {
+  const g = await readKey("col_grupos", null);
+  if (g) return g;
+  const m = new Map();
+  for (const c of await readKey("col_cursos", [])) if (!m.has(c.grupo)) m.set(c.grupo, { id: c.grupo, anio: c.anio, curso: c.curso, tutor_id: c.tutor_id, salon_id: null, horario: null, estado: c.anio < 2026 ? "FINALIZADO" : "ACTIVO" });
+  const init = [...m.values()];
+  await store().setJSON("col_grupos", init, { onlyIfNew: true });
+  return readKey("col_grupos", init);
+}
 async function ensureSeeded() {
   const users = await readKey("users", null);
   return users && users.length > 0;
@@ -43,6 +53,7 @@ async function listFor(user, col) {
   if (user.rol === "tutor") {
     const sc = await tutorScope(user);
     if (col === "cursos") rows = sc.cursos;
+    else if (col === "grupos") rows = rows.filter((g) => g.tutor_id === user.tutor_id);
     else if (col === "estudiantes") rows = rows.filter((e) => sc.estIds.has(e.id));
     else if (col === "notas") rows = rows.filter((n) => sc.cursoIds.has(n.curso_reg_id));
   }
@@ -63,13 +74,26 @@ async function normalize(col, body, existing) {
       return { id: b.id, nivel: num(b.nivel, "Nivel"), libro: num(b.libro, "Libro"), nombre: req_(b.nombre, "Nombre del libro").toUpperCase() };
     case "tipos_pago":
       return { id: req_(b.id || b.nombre, "Nombre"), nombre: req_(b.nombre || b.id, "Nombre"), descripcion: str(b.descripcion) };
+    case "grupos": {
+      const curso = req_(b.curso, "Libro/curso").toUpperCase();
+      if (!/^N\dL\d$/.test(curso)) throw fail(400, "Curso con formato N#L# (ej. N2L3)");
+      const anio = num(b.anio, "Año");
+      if (anio < 2000 || anio > 2100) throw fail(400, "Año inválido");
+      const tutor_id = req_(b.tutor_id, "Tutor");
+      if (!(await getCol("tutores")).some((t) => t.id === tutor_id)) throw fail(400, "El tutor no existe");
+      const salon_id = str(b.salon_id);
+      if (salon_id && !(await getCol("salones")).some((x) => x.id === salon_id)) throw fail(400, "El salón no existe");
+      const estado = str(b.estado) || "ACTIVO";
+      if (!["ACTIVO", "FINALIZADO"].includes(estado)) throw fail(400, "Estado inválido");
+      return { id: b.id, anio, curso, tutor_id, salon_id, horario: str(b.horario), estado };
+    }
     case "cursos": {
       const grupo = req_(b.grupo, "Grupo");
-      const m = grupo.match(/^(\d{4})(N\dL\d)-(\d+)-(\d+)$/);
-      if (!m) throw fail(400, "El grupo debe tener formato AAAANxLy-###-# (ej. 2025N2L3-106-1)");
+      const g = (await getCol("grupos")).find((x) => x.id === grupo);
+      if (!g) throw fail(400, "El grupo no existe; créalo primero en Grupos");
       const estudiante_id = req_(b.estudiante_id, "Estudiante");
       if (!(await getCol("estudiantes")).some((e) => e.id === estudiante_id)) throw fail(400, "Estudiante no existe");
-      return { id: b.id, estudiante_id, grupo, curso: m[2], anio: Number(m[1]), tutor_id: "PAN-" + m[3], descripcion: str(b.descripcion) };
+      return { id: b.id, estudiante_id, grupo, curso: g.curso, anio: g.anio, tutor_id: g.tutor_id, descripcion: str(b.descripcion) };
     }
     case "notas": {
       const curso_reg_id = req_(b.curso_reg_id, "Curso");
@@ -122,8 +146,13 @@ async function checkDelete(col, id) {
     if (await used("cobros", "nivel_id")) throw fail(409, "No se puede borrar: hay cobros con este libro");
   } else if (col === "tipos_pago") {
     if (await used("cobros", "tipo_pago")) throw fail(409, "No se puede borrar: hay pagos con este tipo");
+  } else if (col === "grupos") {
+    const n = await used("cursos", "grupo");
+    if (n) throw fail(409, `No se puede borrar: el grupo tiene ${n} estudiantes inscritos`);
+  } else if (col === "salones") {
+    if ((await getCol("grupos")).some((g) => g.salon_id === id)) throw fail(409, "No se puede borrar: hay grupos en este salón");
   } else if (col === "tutores") {
-    if ((await getCol("cursos")).some((c) => c.tutor_id === id)) throw fail(409, "No se puede borrar: el tutor tiene grupos");
+    if ((await getCol("grupos")).some((g) => g.tutor_id === id) || (await getCol("cursos")).some((c) => c.tutor_id === id)) throw fail(409, "No se puede borrar: el tutor tiene grupos");
   }
 }
 
@@ -292,6 +321,7 @@ export default async function handler(req) {
       }
       if (!perm.write.includes(col)) throw fail(403, "Sin permiso para modificar " + col);
       const key = "col_" + col;
+      if (col === "grupos") await ensureGrupos();
 
       // un tutor solo puede tocar notas de sus propios cursos
       const tutorGuard = async (cursoId) => {
@@ -311,7 +341,13 @@ export default async function handler(req) {
               id = "PAN-" + String(mx + 1).padStart(3, "0");
             } else id = newId();
           }
+          if (col === "grupos" && !v.id) {
+            const base = `${v.anio}${v.curso}-${v.tutor_id.replace("PAN-", "")}-`; let n = 1;
+            while (arr.some((x) => x.id === base + n)) n++;
+            id = base + n;
+          }
           if (arr.some((r) => r.id === id)) throw fail(409, "Ya existe un registro con ese ID");
+          if (col === "cursos" && arr.some((c) => c.estudiante_id === v.estudiante_id && c.grupo === v.grupo)) throw fail(409, "El estudiante ya está inscrito en ese grupo");
           if (col === "notas" && arr.some((n) => n.curso_reg_id === v.curso_reg_id)) throw fail(409, "Ese curso ya tiene nota; edítala");
           const r = { ...v, id };
           return { value: [...arr, r], result: r };
@@ -328,6 +364,8 @@ export default async function handler(req) {
           if (col === "notas") await tutorGuard(v.curso_reg_id);
           return { value: arr.map((r, j) => (j === i ? v : r)), result: v };
         }, []);
+        if (col === "grupos") // el tutor/curso/año del grupo se propagan a sus inscripciones
+          await mutate("col_cursos", (arr) => ({ value: arr.map((c) => (c.grupo === id ? { ...c, curso: rec.curso, anio: rec.anio, tutor_id: rec.tutor_id } : c)), result: true }), []);
         return json(rec);
       }
       if (method === "DELETE") {

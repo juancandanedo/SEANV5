@@ -215,16 +215,12 @@ export async function notas(root) {
 
 /* ======================= CATÁLOGOS (admin) ======================= */
 export async function catalogos(root) {
-  const d = await cols("tutores", "salones", "niveles", "tipos_pago", "cursos", "estudiantes");
-  const eMap = idx(d.estudiantes), tMap = idx(d.tutores);
-  const grupos = [...new Set(d.cursos.map((c) => c.grupo))].sort().reverse();
+  const d = await cols("tutores", "salones", "niveles", "tipos_pago");
   const CFG = {
     tutores: { title: "Tutores", rows: d.tutores, cols: [{ k: "id", t: "ID" }, { k: "nombre", t: "Nombre" }, { k: "nivel", t: "Nivel" }], fields: (e) => [{ name: "id", label: "ID (ej. PAN-114)", required: true, disabled: !!e }, { name: "nombre", label: "Nombre", required: true }, { name: "nivel", label: "Nivel", type: "number", min: 1, required: true }] },
     salones: { title: "Salones", rows: d.salones, cols: [{ k: "id", t: "ID" }, { k: "ubicacion", t: "Ubicación" }, { k: "sede", t: "Sede" }], fields: (e) => [{ name: "id", label: "ID", required: true, disabled: !!e }, { name: "ubicacion", label: "Ubicación", required: true }, { name: "sede", label: "Sede" }] },
     niveles: { title: "Libros", rows: d.niveles, cols: [{ k: "nivel", t: "Nivel" }, { k: "libro", t: "Libro" }, { k: "nombre", t: "Nombre del libro" }], fields: () => [{ name: "nivel", label: "Nivel", type: "number", min: 1, required: true }, { name: "libro", label: "N.º de libro", type: "number", min: 1, required: true }, { name: "nombre", label: "Nombre del libro", required: true }] },
     tipos_pago: { title: "Tipos de pago", rows: d.tipos_pago, cols: [{ k: "nombre", t: "Código" }, { k: "descripcion", t: "Descripción" }], fields: (e) => [{ name: "nombre", label: "Código", required: true, disabled: !!e }, { name: "descripcion", label: "Descripción" }] },
-    cursos: { title: "Inscripciones", rows: d.cursos, cols: [{ k: "anio", t: "Año" }, { k: "grupo", t: "Grupo" }, { k: "curso", t: "Curso" }, { k: "est", t: "Estudiante", sort: (c) => eMap[c.estudiante_id]?.nombre || "", render: (c) => esc(eMap[c.estudiante_id]?.nombre || c.estudiante_id) }, { k: "tutor", t: "Tutor", sort: (c) => tMap[c.tutor_id]?.nombre || c.tutor_id, render: (c) => esc(tMap[c.tutor_id]?.nombre || c.tutor_id) }],
-      fields: (e) => [{ name: "estudiante_id", label: "Estudiante", type: "select", required: true, blank: "Selecciona…", options: opts([...d.estudiantes].sort((a, b) => a.nombre.localeCompare(b.nombre)), (x) => x.id, (x) => `${x.nombre} (${x.id})`) }, { name: "grupo_sel", label: "Grupo existente", type: "select", blank: "— crear uno nuevo —", options: opts(grupos, (g) => g, (g) => g) }, { name: "grupo", label: "…o grupo nuevo", hint: "Formato AAAA + N#L# - ID tutor - n (ej. 2026N2L4-106-1)" }] },
   };
   const f = { tab: "tutores" };
   const render = () => {
@@ -241,7 +237,6 @@ export async function catalogos(root) {
     formModal({ title: (isNew ? "Agregar · " : "Editar · ") + c.title, values: rec || {}, fields: c.fields(rec),
       onSubmit: async (v, m) => {
         let body = { ...v };
-        if (f.tab === "cursos") { body = { estudiante_id: v.estudiante_id, grupo: v.grupo_sel || v.grupo }; if (rec) body.id = rec.id; }
         if (f.tab === "tipos_pago" && isNew) body.id = v.nombre;
         isNew ? await api("data/" + f.tab, "POST", body) : await api(`data/${f.tab}/${encodeURIComponent(rec.id)}`, "PUT", body);
         invalidate(f.tab); m.close(); toast("Guardado"); const t = f.tab; await catalogos(root); f.tab = t; $(`.tabs button[data-tab=${t}]`, root).click();
@@ -342,4 +337,89 @@ async function importer(cobros, eMap) {
     $("#sum", m.el).innerHTML = `<b>${ok}</b> subidos${errs.length ? ` · <span class="pos">${errs.length} con error</span><ul>${errs.slice(0, 10).map((x) => `<li>${esc(x)}</li>`).join("")}</ul>` : " correctamente."}`;
     toast(`${ok} comprobantes cargados`, errs.length > 0);
   };
+}
+
+/* ======================= GRUPOS ======================= */
+const libroDe = (curso, niveles) => {
+  const m = /^N(\d)L(\d)$/.exec(curso || ""); if (!m) return curso || "";
+  const n = niveles.find((x) => x.nivel === +m[1] && x.libro === +m[2]);
+  return `${curso} · ${n ? n.nombre : `Nivel ${m[1]} Libro ${m[2]}`}`;
+};
+
+export async function grupos(root, param) {
+  const d = await cols("grupos", "cursos", "tutores", "salones", "niveles", "estudiantes");
+  const tMap = idx(d.tutores), sMap = idx(d.salones), eMap = idx(d.estudiantes);
+  const admin = can("admin");
+  const inscr = {}; d.cursos.forEach((c) => (inscr[c.grupo] ||= []).push(c));
+  const f = { q: "", anio: "", tutor: "", salon: "", estado: "" };
+  const salonTxt = (g) => (g.salon_id && sMap[g.salon_id] ? `${sMap[g.salon_id].ubicacion} (${sMap[g.salon_id].sede || ""})` : "");
+  const filtered = () => d.grupos.filter((g) => (!f.q || norm(g.id + " " + (tMap[g.tutor_id]?.nombre || "") + " " + libroDe(g.curso, d.niveles)).includes(norm(f.q))) && (!f.anio || String(g.anio) === f.anio) && (!f.tutor || g.tutor_id === f.tutor) && (!f.salon || (f.salon === "-" ? !g.salon_id : g.salon_id === f.salon)) && (!f.estado || g.estado === f.estado));
+  const estadoPill = (g) => (g.estado === "ACTIVO" ? '<span class="pill ok">Activo</span>' : '<span class="pill mute">Finalizado</span>');
+  const render = () => {
+    const cs = [
+      { k: "id", t: "Grupo", render: (g) => `<a href="#/grupos/${encodeURIComponent(g.id)}">${esc(g.id)}</a>` },
+      { k: "anio", t: "Año" },
+      { k: "curso", t: "Libro", sort: (g) => g.curso, render: (g) => esc(libroDe(g.curso, d.niveles)) },
+      { k: "tutor", t: "Tutor", sort: (g) => tMap[g.tutor_id]?.nombre || g.tutor_id, render: (g) => esc(tMap[g.tutor_id]?.nombre || g.tutor_id) },
+      { k: "salon", t: "Salón", sort: (g) => salonTxt(g), render: (g) => (salonTxt(g) ? esc(salonTxt(g)) : '<span class="pill warn">Sin salón</span>') },
+      { k: "horario", t: "Horario" },
+      { k: "n", t: "Inscritos", num: true, sort: (g) => (inscr[g.id] || []).length, render: (g) => (inscr[g.id] || []).length },
+      { k: "estado", t: "Estado", render: estadoPill },
+      { k: "_", t: "", nosort: true, render: (g) => `<button class="btn sm" data-ver="${esc(g.id)}">Ver</button>${admin ? ` <button class="btn sm" data-edit="${esc(g.id)}">Editar</button> <button class="btn sm danger" data-del="${esc(g.id)}">✕</button>` : ""}` },
+    ];
+    $("#tbl", root).innerHTML = table("grp", cs, filtered(), { defaultSort: { k: "anio", dir: -1 }, pageSize: 200 });
+  };
+  const years = [...new Set(d.grupos.map((g) => g.anio))].sort().reverse();
+  root.innerHTML = head("Grupos", "Cada grupo conecta tutor, salón, libro y estudiantes", `<button class="btn" id="exp">Exportar Excel</button>${admin ? '<button class="btn primary" id="new">+ Nuevo grupo</button>' : ""}`) +
+    `<div class="filters"><input class="grow" id="q" placeholder="Buscar grupo, tutor o libro…"><select id="anio"><option value="">Todos los años</option>${years.map((a) => `<option>${a}</option>`).join("")}</select><select id="tutor"><option value="">Todos los tutores</option>${d.tutores.map((t) => `<option value="${esc(t.id)}">${esc(t.nombre)}</option>`).join("")}</select><select id="salon"><option value="">Todos los salones</option><option value="-">Sin salón</option>${d.salones.map((s) => `<option value="${esc(s.id)}">${esc(s.ubicacion)} (${esc(s.sede || "")})</option>`).join("")}</select><select id="estado"><option value="">Activos y finalizados</option><option value="ACTIVO">Activos</option><option value="FINALIZADO">Finalizados</option></select></div><div id="tbl"></div>`;
+  render(); bindTables(root, render);
+  $("#q", root).oninput = (e) => { f.q = e.target.value; render(); };
+  for (const k of ["anio", "tutor", "salon", "estado"]) $("#" + k, root).onchange = (e) => { f[k] = e.target.value; render(); };
+  $("#exp", root).onclick = () => exportXlsx("grupos", filtered().map((g) => ({ Grupo: g.id, Año: g.anio, Curso: g.curso, Libro: libroDe(g.curso, d.niveles).split(" · ")[1], "ID tutor": g.tutor_id, Tutor: tMap[g.tutor_id]?.nombre, Salón: sMap[g.salon_id]?.ubicacion || "", Sede: sMap[g.salon_id]?.sede || "", Horario: g.horario || "", Estado: g.estado, Inscritos: (inscr[g.id] || []).length })), "Grupos");
+
+  const reload = async (keepId) => { invalidate("grupos", "cursos"); await grupos(root, keepId); };
+  const cursoOptions = () => {
+    const set = new Map(); d.niveles.forEach((n) => set.set(`N${n.nivel}L${n.libro}`, n.nombre)); d.grupos.forEach((g) => !set.has(g.curso) && set.set(g.curso, ""));
+    return [...set.entries()].sort().map(([k, n]) => ({ v: k, t: n ? `${k} · ${n}` : k }));
+  };
+  const form = (g) => formModal({
+    title: g ? `Editar grupo ${g.id}` : "Nuevo grupo", values: g || { anio: new Date().getFullYear(), estado: "ACTIVO" },
+    fields: [
+      { name: "anio", label: "Año", type: "number", min: 2000, max: 2100, required: true },
+      { name: "curso", label: "Libro", type: "select", required: true, blank: "Selecciona…", options: cursoOptions() },
+      { name: "tutor_id", label: "Tutor", type: "select", required: true, blank: "Selecciona…", options: opts(d.tutores, (t) => t.id, (t) => `${t.nombre} (nivel ${t.nivel})`) },
+      { name: "salon_id", label: "Salón", type: "select", blank: "Sin salón asignado", options: opts(d.salones, (s) => s.id, (s) => `${s.ubicacion} · ${s.sede || ""}`) },
+      { name: "horario", label: "Horario", hint: "Ej. Sábados 9:00 am" },
+      { name: "estado", label: "Estado", type: "select", blank: false, options: [{ v: "ACTIVO", t: "Activo" }, { v: "FINALIZADO", t: "Finalizado" }] },
+    ],
+    extra: g ? '<p style="color:var(--muted);font-size:.85rem">El código del grupo no cambia. Si cambias tutor, libro o año, se actualiza en todas sus inscripciones.</p>' : "",
+    onSubmit: async (v, m) => { g ? await api("data/grupos/" + encodeURIComponent(g.id), "PUT", v) : await api("data/grupos", "POST", v); m.close(); toast("Grupo guardado"); await reload(); },
+  });
+
+  function detalle(id) {
+    const g = d.grupos.find((x) => x.id === id); if (!g) return toast("Grupo no encontrado", true);
+    const ins = (inscr[id] || []).map((c) => ({ ...c, e: eMap[c.estudiante_id] })).sort((a, b) => (a.e?.nombre || "").localeCompare(b.e?.nombre || ""));
+    const libres = d.estudiantes.filter((e) => !ins.some((c) => c.estudiante_id === e.id)).sort((a, b) => a.nombre.localeCompare(b.nombre));
+    const m = modal(`Grupo ${g.id}`, `<div class="cards"><div class="card kpi"><div class="l">Libro</div><div style="font-weight:650;margin-top:.2rem">${esc(libroDe(g.curso, d.niveles))}</div><div class="n">Año ${g.anio} · ${estadoPill(g)}</div></div>
+      <div class="card kpi"><div class="l">Tutor</div><div style="font-weight:650;margin-top:.2rem">${esc(tMap[g.tutor_id]?.nombre || g.tutor_id)}</div><div class="n">${esc(g.tutor_id)}</div></div>
+      <div class="card kpi"><div class="l">Salón</div><div style="font-weight:650;margin-top:.2rem">${salonTxt(g) ? esc(salonTxt(g)) : "Sin salón asignado"}</div><div class="n">${esc(g.horario || "Sin horario")}</div></div></div>
+      <h3 style="margin:.4rem 0 .6rem">Estudiantes inscritos (${ins.length})</h3>
+      ${admin ? `<div class="filters"><select id="addE" class="grow" style="max-width:420px"><option value="">Agregar estudiante…</option>${libres.map((e) => `<option value="${esc(e.id)}">${esc(e.nombre)} (${esc(e.id)})</option>`).join("")}</select><button class="btn primary" id="addB" style="flex:0 0 auto">Inscribir</button></div>` : ""}
+      ${table("grp-ins-" + id, [{ k: "n", t: "Estudiante", sort: (c) => c.e?.nombre || "", render: (c) => `<a href="#/estudiantes/${esc(c.estudiante_id)}">${esc(c.e?.nombre || c.estudiante_id)}</a>` }, { k: "sede", t: "Sede", render: (c) => esc(c.e?.sede || "") }, { k: "tel", t: "Teléfono", render: (c) => esc(c.e?.telefono || "") }, ...(admin ? [{ k: "_", t: "", nosort: true, render: (c) => `<button class="btn sm danger" data-quitar="${esc(c.id)}">Quitar</button>` }] : [])], ins, { pageSize: 500, empty: "Aún no hay estudiantes inscritos" })}
+      <div class="actions noprint" style="justify-content:flex-end;margin-top:1rem">${can("admin", "tutor") ? '<a class="btn" href="#/notas">Ir a notas</a>' : ""}${admin ? '<button class="btn" id="edG">Editar grupo</button>' : ""}</div>`,
+      { wide: true, onClose: () => { if (location.hash.startsWith("#/grupos/")) history.replaceState(null, "", "#/grupos"); } });
+    if (admin) {
+      $("#edG", m.el).onclick = () => { m.close(); form(g); };
+      $("#addB", m.el).onclick = async () => { const e = $("#addE", m.el).value; if (!e) return; try { await api("data/cursos", "POST", { estudiante_id: e, grupo: id }); toast("Estudiante inscrito"); m.close(); await reload(id); } catch (x) { toast(x.message, true); } };
+      m.el.addEventListener("click", (ev) => { const b = ev.target.closest("[data-quitar]"); if (!b) return; const c = ins.find((x) => x.id === b.dataset.quitar); confirmBox(`¿Quitar a ${c.e?.nombre} del grupo ${id}?`, async () => { await api("data/cursos/" + c.id, "DELETE"); toast("Inscripción eliminada"); m.close(); await reload(id); }, "Quitar"); });
+    }
+  }
+  root.onclick = (ev) => {
+    const b = ev.target.closest("button"); if (!b) return;
+    if (b.id === "new") form();
+    if (b.dataset.ver) detalle(b.dataset.ver);
+    if (b.dataset.edit) form(d.grupos.find((x) => x.id === b.dataset.edit));
+    if (b.dataset.del) confirmBox(`¿Eliminar el grupo ${b.dataset.del}?`, async () => { await api("data/grupos/" + encodeURIComponent(b.dataset.del), "DELETE"); toast("Grupo eliminado"); await reload(); });
+  };
+  if (param) detalle(param);
 }

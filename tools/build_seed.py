@@ -62,7 +62,14 @@ for r in cob.itertuples():
                        tipo_pago=clean(r.TIPO_PAGO), notas=clean(r.NOTAS),
                        imagen=None if img in (None, "XXX") else img))
 
-out = dict(estudiantes=estudiantes, tutores=tutores, salones=salones, niveles=niveles, tipos_pago=tipos_pago,
+# grupos: se deducen del código (año + curso + tutor); salón y horario se asignan luego en la app
+gmap = {}
+for c in cursos:
+    gmap.setdefault(c["grupo"], dict(id=c["grupo"], anio=c["anio"], curso=c["curso"], tutor_id=c["tutor_id"],
+                                     salon_id=None, horario=None, estado="FINALIZADO" if c["anio"] < 2026 else "ACTIVO"))
+grupos = list(gmap.values())
+
+out = dict(grupos=grupos, estudiantes=estudiantes, tutores=tutores, salones=salones, niveles=niveles, tipos_pago=tipos_pago,
            cursos=cursos, notas=notas, cobros=cobros)
 os.makedirs("seed", exist_ok=True)
 json.dump(out, open("seed/seed.json", "w", encoding="utf-8"), ensure_ascii=False, separators=(",", ":"))

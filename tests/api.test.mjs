@@ -89,4 +89,25 @@ r = await call("x", "POST", "/api/recovery", { usuario: "noexiste", password: "n
 r = await call("x", "POST", "/api/recovery", { usuario: "juancarlos", password: "nuevaclave1", key: "clave-secreta-123" }); assert.equal(r.s, 200);
 r = await call("y", "POST", "/api/login", { usuario: "juancarlos", password: "nuevaclave1" }); assert.equal(r.s, 200);
 r = await call("y", "POST", "/api/login", { usuario: "juancarlos", password: "otraclave99" }); assert.equal(r.s, 401); ok("recuperación de contraseña");
+// grupos
+await call("a", "POST", "/api/login", { usuario: "juancarlos", password: "nuevaclave1" });
+r = await call("a", "GET", "/api/data/grupos"); assert.equal(r.d.length, 64);
+fs.unlinkSync(dir + "/col_grupos.json"); r = await call("a", "GET", "/api/data/grupos"); assert.equal(r.d.length, 64); ok("migración perezosa de grupos");
+r = await call("a", "POST", "/api/data/grupos", { anio: 2026, curso: "N2L4", tutor_id: "PAN-106", salon_id: "106", horario: "Sáb 9am" }); assert.equal(r.s, 201); assert.match(r.d.id, /^2026N2L4-106-\d+$/); const gid = r.d.id;
+r = await call("a", "POST", "/api/data/grupos", { anio: 2026, curso: "N2L4", tutor_id: "PAN-106" }); assert.notEqual(r.d.id, gid);
+r = await call("a", "POST", "/api/data/grupos", { anio: 2026, curso: "xx", tutor_id: "PAN-106" }); assert.equal(r.s, 400);
+r = await call("a", "POST", "/api/data/grupos", { anio: 2026, curso: "N2L4", tutor_id: "PAN-999" }); assert.equal(r.s, 400);
+r = await call("a", "POST", "/api/data/grupos", { anio: 2026, curso: "N2L4", tutor_id: "PAN-106", salon_id: "999" }); assert.equal(r.s, 400); ok("alta de grupos y validaciones");
+r = await call("a", "POST", "/api/data/cursos", { estudiante_id: "PAN-003", grupo: gid }); assert.equal(r.s, 201); assert.equal(r.d.tutor_id, "PAN-106"); const iid = r.d.id;
+r = await call("a", "POST", "/api/data/cursos", { estudiante_id: "PAN-003", grupo: gid }); assert.equal(r.s, 409);
+r = await call("a", "POST", "/api/data/cursos", { estudiante_id: "PAN-003", grupo: "no-existe" }); assert.equal(r.s, 400); ok("inscripción");
+r = await call("a", "DELETE", "/api/data/grupos/" + gid); assert.equal(r.s, 409);
+r = await call("u", "GET", "/api/data/grupos"); assert(r.d.every((g) => g.tutor_id === "PAN-106") && r.d.some((g) => g.id === gid)); ok("tutor ve solo sus grupos");
+r = await call("u", "POST", "/api/data/grupos", { anio: 2026, curso: "N2L4", tutor_id: "PAN-106" }); assert.equal(r.s, 403);
+r = await call("a", "PUT", "/api/data/grupos/" + gid, { tutor_id: "PAN-105", salon_id: "101", anio: 2026, curso: "N2L4" }); assert.equal(r.d.tutor_id, "PAN-105");
+r = await call("a", "GET", "/api/data/cursos"); assert.equal(r.d.find((c) => c.id === iid).tutor_id, "PAN-105");
+r = await call("u", "GET", "/api/data/grupos"); assert(!r.d.some((g) => g.id === gid)); ok("cambio de tutor se propaga");
+r = await call("a", "DELETE", "/api/data/salones/101"); assert.equal(r.s, 409);
+r = await call("a", "DELETE", "/api/data/cursos/" + iid); assert.equal(r.s, 200);
+r = await call("a", "DELETE", "/api/data/grupos/" + gid); assert.equal(r.s, 200); ok("baja de grupo");
 console.log("TODO OK");
