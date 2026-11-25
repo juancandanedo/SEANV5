@@ -345,6 +345,43 @@ export default async function handler(req) {
       return json(saved);
     }
 
+    // Reportes secuenciales de ingresos: cada reporte se numera y guarda los pagos que incluyó,
+    // así el siguiente nunca repite un pago ya reportado (aunque los rangos de fechas se crucen).
+    if (parts[0] === "cortes") {
+      if (!["admin", "tesoreria"].includes(user.rol)) throw fail(403, "Sin permiso");
+      if (method === "GET") return json(await readKey("col_cortes", []));
+      if (method === "POST") {
+        const desde = req_(body.desde, "Fecha desde"), hasta = req_(body.hasta, "Fecha hasta");
+        if (![desde, hasta].every((d) => /^\d{4}-\d{2}-\d{2}$/.test(d))) throw fail(400, "Fecha inválida");
+        if (desde > hasta) throw fail(400, "La fecha desde no puede ser posterior a la fecha hasta");
+        const [cobros, estudiantes] = await Promise.all([getCol("cobros"), getCol("estudiantes")]);
+        const eMap = Object.fromEntries(estudiantes.map((e) => [e.id, e]));
+        const rec = await mutate("col_cortes", (arr) => {
+          const usados = new Set(arr.flatMap((c) => c.items.map((i) => i.id)));
+          const items = cobros.filter((c) => c.pago > 0 && c.fecha >= desde && c.fecha <= hasta && !usados.has(c.id))
+            .sort((a, b) => a.fecha.localeCompare(b.fecha))
+            .map((c) => ({ id: c.id, fecha: c.fecha, estudiante_id: c.estudiante_id, nombre: eMap[c.estudiante_id]?.nombre || c.estudiante_id, tipo_pago: c.tipo_pago || "—", pago: c.pago, libro: c.libro ?? null }));
+          if (!items.length) throw fail(400, "No hay ingresos nuevos (sin reportar) en ese rango de fechas");
+          const numero = Math.max(0, ...arr.map((c) => c.numero)) + 1;
+          const total = Math.round(items.reduce((a, i) => a + i.pago, 0) * 100) / 100;
+          const r = { id: newId(), numero, desde, hasta, creado_en: new Date().toISOString(), creado_por: user.nombre, nota: str(body.nota), n: items.length, total, items };
+          return { value: [...arr, r], result: r };
+        }, []);
+        return json(rec, 201);
+      }
+      if (method === "DELETE") {
+        if (user.rol !== "admin") throw fail(403, "Solo el administrador puede anular un reporte");
+        const id = decodeURIComponent(parts[1] || "");
+        await mutate("col_cortes", (arr) => {
+          const r = arr.find((c) => c.id === id);
+          if (!r) throw fail(404, "Reporte no encontrado");
+          if (r.numero !== Math.max(...arr.map((c) => c.numero))) throw fail(409, "Solo se puede anular el último reporte de la secuencia");
+          return { value: arr.filter((c) => c.id !== id), result: true };
+        }, []);
+        return json({ ok: true });
+      }
+    }
+
     if (parts[0] === "data") {
       const col = parts[1];
       if (!COLS.includes(col)) throw fail(404, "Colección desconocida");
@@ -405,6 +442,10 @@ export default async function handler(req) {
       }
       if (method === "DELETE") {
         await checkDelete(col, id);
+        if (col === "cobros") {
+          const c = (await readKey("col_cortes", [])).find((x) => x.items.some((i) => i.id === id));
+          if (c) throw fail(409, `No se puede borrar: el pago ya está en el reporte de ingresos N.º ${c.numero}`);
+        }
         if (col === "cursos") await mutate("col_asistencia", (arr) => ({ value: arr.filter((a) => a.curso_reg_id !== id), result: true }), []);
         await mutate(key, async (arr) => {
           const r = arr.find((x) => x.id === id);

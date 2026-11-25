@@ -132,4 +132,24 @@ r = await call("a", "POST", "/api/data/cursos", { estudiante_id: "PAN-010", grup
 await call("a", "POST", "/api/semana", { grupo: g2, semana: 1, items: [{ curso_reg_id: i2, a: "P", p: "C" }] });
 await call("a", "DELETE", "/api/data/cursos/" + i2);
 r = await call("a", "GET", "/api/data/asistencia"); assert(!r.d.some((x) => x.curso_reg_id === i2)); await call("a", "DELETE", "/api/data/grupos/" + g2); ok("quitar inscripción borra su asistencia");
+// reporte secuencial de ingresos
+r = await call("u", "GET", "/api/cortes"); assert.equal(r.s, 403);
+r = await call("t", "GET", "/api/cortes"); assert.equal(r.s, 200); assert.equal(r.d.length, 0);
+r = await call("t", "POST", "/api/cortes", { desde: "2026-02-01", hasta: "2026-01-01" }); assert.equal(r.s, 400);
+r = await call("t", "POST", "/api/cortes", { desde: "1990-01-01", hasta: "1990-12-31" }); assert.equal(r.s, 400);
+const pagos = (await call("a", "GET", "/api/data/cobros")).d.filter((c) => c.pago > 0).map((c) => c.fecha).sort();
+const mid = pagos[Math.floor(pagos.length / 2)];
+r = await call("t", "POST", "/api/cortes", { desde: "2000-01-01", hasta: mid, nota: "primero" }); assert.equal(r.s, 201); assert.equal(r.d.numero, 1); const c1 = r.d;
+assert(c1.items.every((i) => i.fecha <= mid && i.nombre));
+r = await call("t", "POST", "/api/cortes", { desde: "2000-01-01", hasta: mid }); assert.equal(r.s, 400); // nada nuevo: no repite
+r = await call("t", "POST", "/api/data/cobros", { fecha: pagos[0], estudiante_id: "PAN-001", libro: 1, pago: 7, tipo_pago: "EF-Iglesia" }); const late = r.d.id; // pago atrasado
+r = await call("t", "POST", "/api/cortes", { desde: pagos[0], hasta: "2100-01-01" }); assert.equal(r.s, 201); assert.equal(r.d.numero, 2);
+const c2 = r.d; assert(c2.items.some((i) => i.id === late)); assert(!c2.items.some((i) => c1.items.some((j) => j.id === i.id)));
+assert.equal(c1.n + c2.n, pagos.length + 1); ok("reportes secuenciales sin repetir pagos");
+r = await call("t", "DELETE", "/api/data/cobros/" + late); assert.equal(r.s, 409); ok("no se borra un pago ya reportado");
+r = await call("t", "DELETE", "/api/cortes/" + c2.id); assert.equal(r.s, 403);
+r = await call("a", "DELETE", "/api/cortes/" + c1.id); assert.equal(r.s, 409);
+r = await call("a", "DELETE", "/api/cortes/" + c2.id); assert.equal(r.s, 200);
+r = await call("a", "DELETE", "/api/data/cobros/" + late); assert.equal(r.s, 200);
+r = await call("t", "GET", "/api/cortes"); assert.equal(r.d.length, 1); ok("anular el último reporte");
 console.log("TODO OK");
