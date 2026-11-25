@@ -51,3 +51,11 @@ Módulo *Grupos*: cada grupo une **año + libro + tutor + salón + horario + est
 - Cálculo: asistencia = 100 − 5 por tarde − 10 por falta; pruebas = 100 − 5 por incompleta − 10 por no hecha; examen final = 100 − 1 por cada error; **total = promedio de las tres**. Aprueba con **≥ 80%** (Usuarios → Ajustes → nota mínima).
 - *Registro del grupo y notas finales*: matriz equivalente al «Registro» del manual, con examen (por errores), total y resultado; exportable a Excel e imprimible.
 - Un tutor solo registra en sus propios grupos. Quitar a un estudiante de un grupo borra su asistencia.
+
+## Reporte secuencial de ingresos
+*Reportes → Ingresos secuencial* (Administrador y Tesorería).
+- Eliges **desde / hasta**; la vista previa agrupa los pagos **por nombre** (con una columna por tipo de pago) y **por tipo de pago**, con totales.
+- **Generar reporte N.º X** lo guarda con número consecutivo. Cada reporte recuerda exactamente qué pagos incluyó, así que **el siguiente nunca repite pagos** de uno anterior, aunque los rangos de fechas se crucen.
+- La fecha *desde* se propone sola (el día después del último reporte). Si alguien registró tarde un pago con fecha anterior, aparece un aviso con el botón «Incluirlos».
+- Los reportes generados se pueden ver, imprimir/PDF y exportar a Excel (hojas: por nombre, por tipo de pago y detalle). Guardan una copia de los pagos, así no cambian después.
+- Un pago ya reportado no se puede borrar. El administrador puede **anular el último reporte** (sus pagos vuelven a quedar pendientes).

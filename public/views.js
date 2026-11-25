@@ -252,11 +252,11 @@ export async function catalogos(root) {
 
 /* ======================= REPORTES ======================= */
 export async function reportes(root) {
-  const tabs = [...(can("admin", "tesoreria") ? [["morosos", "Morosos"], ["ingresos", "Ingresos"]] : []), ...(can("admin", "tutor") ? [["notas", "Notas por grupo"]] : [])];
+  const tabs = [...(can("admin", "tesoreria") ? [["morosos", "Morosos"], ["ingresos", "Ingresos"], ["secuencial", "Ingresos secuencial"]] : []), ...(can("admin", "tutor") ? [["notas", "Notas por grupo"]] : [])];
   const f = { tab: tabs[0][0] };
   const draw = async () => {
     $$(".tabs button", root).forEach((b) => b.classList.toggle("on", b.dataset.tab === f.tab));
-    const pane = $("#pane", root);
+    const pane = $("#pane", root); pane.onclick = null;
     if (f.tab === "morosos") {
       const { cobros, estudiantes } = await cols("cobros", "estudiantes");
       const sal = saldoPorEstudiante(cobros);
@@ -264,6 +264,8 @@ export async function reportes(root) {
       const wa = (e, saldo) => { const t = (e.telefono || "").replace(/\D/g, ""); if (t.length !== 8 || !["PANAMA", "VACAMONTE", "TUTOR"].includes(e.sede)) return ""; return ` <a class="btn sm" target="_blank" rel="noopener" href="https://wa.me/507${t}?text=${encodeURIComponent(`Hola ${e.nombre.split(" ")[0]}, te escribimos de ${S.settings.nombre_programa}. Tu saldo pendiente es de ${money(saldo)}. ¡Gracias!`)}">WhatsApp</a>`; };
       pane.innerHTML = `<div class="actions" style="margin-bottom:.8rem"><button class="btn" id="exp">Exportar Excel</button></div>` + table("morosos", [{ k: "id", t: "ID", sort: (r) => r.e.id, render: (r) => esc(r.e.id) }, { k: "n", t: "Estudiante", sort: (r) => r.e.nombre, render: (r) => `<a href="#/estudiantes/${esc(r.e.id)}">${esc(r.e.nombre)}</a>` }, { k: "sede", t: "Sede", sort: (r) => r.e.sede || "", render: (r) => esc(r.e.sede || "") }, { k: "debe", t: "Cargado", num: true, render: (r) => money(r.debe) }, { k: "pago", t: "Pagado", num: true, render: (r) => money(r.pago) }, { k: "saldo", t: "Saldo", num: true, render: (r) => `<span class="pos">${money(r.saldo)}</span>` }, { k: "up", t: "Último pago", sort: (r) => r.ultimoPago || "", render: (r) => fdate(r.ultimoPago) || "—" }, { k: "_", t: "", nosort: true, render: (r) => wa(r.e, r.saldo) }], rows, { defaultSort: { k: "saldo", dir: -1 }, footer: `Total por cobrar <b>${money(sum(rows, (r) => r.saldo))}</b>`, empty: "Nadie tiene saldo pendiente" });
       $("#exp", root).onclick = () => exportXlsx("morosos", rows.map((r) => ({ ID: r.e.id, Estudiante: r.e.nombre, Sede: r.e.sede, Teléfono: r.e.telefono, Email: r.e.email, Cargado: r.debe, Pagado: r.pago, Saldo: r.saldo, "Último pago": r.ultimoPago })), "Morosos");
+    } else if (f.tab === "secuencial") {
+      await secuencial(pane, f);
     } else if (f.tab === "ingresos") {
       const { cobros, niveles } = await cols("cobros", "niveles");
       const m = {}; cobros.forEach((c) => { const k = c.fecha.slice(0, 7); const x = (m[k] ||= { mes: k, pagos: 0, n: 0, cargos: 0 }); x.pagos += c.pago || 0; x.cargos += c.debe || 0; if (c.pago > 0) x.n++; });
@@ -287,6 +289,92 @@ export async function reportes(root) {
   bindTables(root, draw); draw();
 }
 
+/* ---------- Reporte secuencial de ingresos (por nombre y por tipo de pago) ---------- */
+const addDay = (ymd, n = 1) => { const d = new Date(ymd + "T12:00:00Z"); d.setUTCDate(d.getUTCDate() + n); return d.toISOString().slice(0, 10); };
+const r2 = (n) => Math.round(n * 100) / 100;
+function resumenIngresos(items) {
+  const tipos = [...new Set(items.map((i) => i.tipo_pago))].sort();
+  const porTipo = {}, porNombre = {};
+  for (const i of items) {
+    const t = (porTipo[i.tipo_pago] ||= { tipo: i.tipo_pago, n: 0, total: 0 }); t.n++; t.total += i.pago;
+    const p = (porNombre[i.estudiante_id] ||= { id: i.estudiante_id, nombre: i.nombre, n: 0, total: 0, t: {} }); p.n++; p.total += i.pago; p.t[i.tipo_pago] = (p.t[i.tipo_pago] || 0) + i.pago;
+  }
+  Object.values(porTipo).forEach((x) => (x.total = r2(x.total)));
+  Object.values(porNombre).forEach((x) => { x.total = r2(x.total); for (const k in x.t) x.t[k] = r2(x.t[k]); });
+  return { tipos, porTipo: Object.values(porTipo).sort((a, b) => b.total - a.total), porNombre: Object.values(porNombre).sort((a, b) => a.nombre.localeCompare(b.nombre, "es")), total: r2(items.reduce((a, i) => a + i.pago, 0)) };
+}
+function corteHtml(items, tid) {
+  const R = resumenIngresos(items);
+  const th = (t, num) => `<th class="nosort ${num ? "num" : ""}">${esc(t)}</th>`;
+  const tipoTbl = `<div class="tablewrap"><table><thead><tr>${th("Tipo de pago")}${th("N.º pagos", 1)}${th("Total", 1)}</tr></thead><tbody>${R.porTipo.map((x) => `<tr><td>${esc(x.tipo)}</td><td class="num">${x.n}</td><td class="num">${money(x.total)}</td></tr>`).join("")}<tr><td><b>Total</b></td><td class="num"><b>${items.length}</b></td><td class="num"><b>${money(R.total)}</b></td></tr></tbody></table></div>`;
+  const nomTbl = table(tid, [{ k: "nombre", t: "Nombre", render: (r) => `${esc(r.nombre)} <small style="color:var(--muted)">${esc(r.id)}</small>` }, { k: "n", t: "Pagos", num: true }, ...R.tipos.map((t) => ({ k: "t_" + t, t, num: true, sort: (r) => r.t[t] || 0, render: (r) => (r.t[t] ? money(r.t[t]) : "—") })), { k: "total", t: "Total", num: true, render: (r) => `<b>${money(r.total)}</b>` }], R.porNombre, { pageSize: 500, footer: R.tipos.map((t) => `${esc(t)}: <b>${money(R.porTipo.find((x) => x.tipo === t).total)}</b>`).join(" · ") + ` · Total <b>${money(R.total)}</b>` });
+  return `<div class="cards">${kpi("Total ingresos", money(R.total))}${kpi("Pagos", items.length)}${kpi("Personas", R.porNombre.length)}${kpi("Tipos de pago", R.tipos.length)}</div>
+    <div class="card" style="margin-bottom:1rem"><h2 style="margin-bottom:.7rem">Por tipo de pago</h2>${tipoTbl}</div>
+    <div class="card" style="margin-bottom:1rem"><h2 style="margin-bottom:.7rem">Por nombre y tipo de pago</h2>${nomTbl}</div>`;
+}
+function exportCorte(items, name) {
+  const R = resumenIngresos(items);
+  const hojas = [
+    ["Por nombre", R.porNombre.map((r) => ({ ID: r.id, Nombre: r.nombre, Pagos: r.n, ...Object.fromEntries(R.tipos.map((t) => [t, r.t[t] || 0])), Total: r.total }))],
+    ["Por tipo de pago", [...R.porTipo.map((x) => ({ "Tipo de pago": x.tipo, "N.º pagos": x.n, Total: x.total })), { "Tipo de pago": "TOTAL", "N.º pagos": items.length, Total: R.total }]],
+    ["Detalle", items.map((i) => ({ Fecha: i.fecha, ID: i.estudiante_id, Nombre: i.nombre, "Tipo de pago": i.tipo_pago, Libro: i.libro ?? "", Monto: i.pago }))],
+  ];
+  if (!window.XLSX) return exportXlsx(name, hojas[0][1], hojas[0][0]);
+  const wb = XLSX.utils.book_new();
+  for (const [n, rows] of hojas) XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(rows), n);
+  XLSX.writeFile(wb, name + ".xlsx");
+}
+async function secuencial(pane, f) {
+  const [cortes, { cobros, estudiantes }] = await Promise.all([api("cortes"), cols("cobros", "estudiantes")]);
+  const eMap = idx(estudiantes);
+  const usados = new Set(cortes.flatMap((c) => c.items.map((i) => i.id)));
+  const ultimo = cortes.reduce((a, c) => (!a || c.numero > a.numero ? c : a), null);
+  const pend = cobros.filter((c) => c.pago > 0 && !usados.has(c.id));
+  const minPend = pend.reduce((a, c) => (!a || c.fecha < a ? c.fecha : a), null);
+  const st = (f.sec ||= { desde: ultimo ? addDay(ultimo.hasta) : minPend || today(), hasta: today() });
+  const items = pend.filter((c) => c.fecha >= st.desde && c.fecha <= st.hasta).sort((a, b) => a.fecha.localeCompare(b.fecha))
+    .map((c) => ({ id: c.id, fecha: c.fecha, estudiante_id: c.estudiante_id, nombre: eMap[c.estudiante_id]?.nombre || c.estudiante_id, tipo_pago: c.tipo_pago || "—", pago: c.pago, libro: c.libro ?? null }));
+  const atrasados = pend.filter((c) => c.fecha < st.desde);
+  const prox = (ultimo?.numero || 0) + 1;
+  pane.innerHTML = `<div class="card" style="margin-bottom:1rem">
+      <h2 style="margin-bottom:.4rem">Próximo reporte: N.º ${prox}</h2>
+      <p style="margin:0 0 .7rem;color:var(--muted)">Cada reporte incluye solo los pagos que no salieron en un reporte anterior. ${ultimo ? `El último (N.º ${ultimo.numero}) cubrió del ${fdate(ultimo.desde)} al ${fdate(ultimo.hasta)}.` : "Aún no hay reportes generados."}</p>
+      <div class="row"><div class="field"><label>Desde</label><input type="date" id="sq-desde" value="${esc(st.desde)}"></div><div class="field"><label>Hasta</label><input type="date" id="sq-hasta" value="${esc(st.hasta)}"></div><div class="field"><label>Nota (opcional)</label><input id="sq-nota" placeholder="Ej. entregado a tesorería de la iglesia"></div></div>
+      ${atrasados.length ? `<div class="err" style="margin:.5rem 0">Hay ${atrasados.length} pago(s) sin reportar con fecha anterior al ${fdate(st.desde)} (${money(sum(atrasados, (c) => c.pago))}), probablemente registrados tarde. <button class="btn sm" id="sq-incl">Incluirlos</button></div>` : ""}
+      <div class="actions" style="margin-top:.6rem"><button class="btn primary" id="sq-gen" ${items.length ? "" : "disabled"}>Generar reporte N.º ${prox}</button><button class="btn" id="sq-exp">Exportar vista previa</button></div>
+    </div>
+    <h2 style="margin:.4rem 0 .7rem">Vista previa ${items.length ? "" : "· sin pagos nuevos en ese rango"}</h2>
+    ${items.length ? corteHtml(items, "sec-prev") : '<div class="empty card">No hay pagos sin reportar entre esas fechas.</div>'}
+    <div class="card" style="margin-top:1rem"><h2 style="margin-bottom:.7rem">Reportes generados</h2>
+    ${table("sec-hist", [{ k: "numero", t: "N.º", num: true }, { k: "desde", t: "Desde", render: (r) => fdate(r.desde) }, { k: "hasta", t: "Hasta", render: (r) => fdate(r.hasta) }, { k: "n", t: "Pagos", num: true }, { k: "total", t: "Total", num: true, render: (r) => money(r.total) }, { k: "creado_en", t: "Generado", render: (r) => `${fdate(r.creado_en.slice(0, 10))} · ${esc(r.creado_por || "")}` }, { k: "nota", t: "Nota", wrap: true, render: (r) => esc(r.nota || "") }, { k: "_", t: "", nosort: true, render: (r) => `<button class="btn sm" data-ver="${esc(r.id)}">Ver</button>${can("admin") && r.numero === ultimo.numero ? ` <button class="btn sm danger" data-anular="${esc(r.id)}">Anular</button>` : ""}` }], cortes, { defaultSort: { k: "numero", dir: -1 }, empty: "Aún no hay reportes" })}</div>`;
+  const redraw = () => secuencial(pane, f);
+  $("#sq-desde", pane).onchange = (e) => { st.desde = e.target.value || st.desde; redraw(); };
+  $("#sq-hasta", pane).onchange = (e) => { st.hasta = e.target.value || st.hasta; redraw(); };
+  if ($("#sq-incl", pane)) $("#sq-incl", pane).onclick = () => { st.desde = minPend; redraw(); };
+  $("#sq-exp", pane).onclick = () => exportCorte(items, `ingresos_vista_previa_${st.desde}_${st.hasta}`);
+  $("#sq-gen", pane).onclick = async (e) => {
+    if (st.desde > st.hasta) return toast("La fecha desde no puede ser posterior a la fecha hasta", true);
+    e.target.disabled = true;
+    try {
+      const r = await api("cortes", "POST", { desde: st.desde, hasta: st.hasta, nota: $("#sq-nota", pane).value });
+      toast(`Reporte N.º ${r.numero} generado: ${r.n} pagos, ${money(r.total)}`);
+      f.sec = null; await redraw(); verCorte(r);
+    } catch (ex) { toast(ex.message, true); e.target.disabled = false; }
+  };
+  pane.onclick = (ev) => {
+    const v = ev.target.closest("[data-ver]"), a = ev.target.closest("[data-anular]");
+    if (v) verCorte(cortes.find((c) => c.id === v.dataset.ver));
+    if (a) { const c = cortes.find((x) => x.id === a.dataset.anular); confirmBox(`¿Anular el reporte N.º ${c.numero}? Sus ${c.n} pagos volverán a quedar pendientes para el próximo reporte.`, async () => { await api("cortes/" + c.id, "DELETE"); toast("Reporte anulado"); f.sec = null; await redraw(); }, "Anular"); }
+  };
+}
+function verCorte(c) {
+  const m = modal(`Reporte de ingresos N.º ${c.numero}`, `<div class="sub" style="margin-bottom:.8rem"><b>${esc(S.settings.nombre_programa)}</b> · Del ${fdate(c.desde)} al ${fdate(c.hasta)} · Generado el ${fdate(c.creado_en.slice(0, 10))} por ${esc(c.creado_por || "")}${c.nota ? ` · ${esc(c.nota)}` : ""}</div>` + corteHtml(c.items, "sec-ver-" + c.id) +
+    `<div class="actions noprint" style="justify-content:flex-end;margin-top:1rem"><button class="btn" id="cx">Exportar Excel</button><button class="btn" id="cp">Imprimir / PDF</button></div>`, { wide: true });
+  $("#cx", m.el).onclick = () => exportCorte(c.items, `reporte_ingresos_${String(c.numero).padStart(3, "0")}`);
+  $("#cp", m.el).onclick = () => { document.body.classList.add("printing"); window.print(); };
+  window.addEventListener("afterprint", () => document.body.classList.remove("printing"), { once: true });
+}
+
 /* ======================= USUARIOS Y AJUSTES (admin) ======================= */
 export async function usuarios(root) {
   const [users, tutores] = await Promise.all([api("users"), col("tutores")]);
@@ -295,7 +383,7 @@ export async function usuarios(root) {
     $("#tbl", root).innerHTML = table("usr", [{ k: "usuario", t: "Usuario" }, { k: "nombre", t: "Nombre" }, { k: "rol", t: "Rol", render: (u) => `<span class="pill ${u.rol === "admin" ? "warn" : "mute"}">${ROL[u.rol]}</span>` }, { k: "tutor_id", t: "Tutor vinculado", render: (u) => esc(tutores.find((t) => t.id === u.tutor_id)?.nombre || "") }, { k: "activo", t: "Estado", render: (u) => (u.activo ? '<span class="pill ok">Activo</span>' : '<span class="pill bad">Inactivo</span>') }, { k: "_", t: "", nosort: true, render: (u) => `<button class="btn sm" data-edit="${esc(u.id)}">Editar</button> ${u.id !== S.user.id ? `<button class="btn sm danger" data-del="${esc(u.id)}">✕</button>` : ""}` }], users);
   };
   root.innerHTML = head("Usuarios y ajustes", "Quién entra a la aplicación y qué puede hacer", `<button class="btn" id="cfg">Ajustes del programa</button><button class="btn primary" id="new">+ Nuevo usuario</button>`) +
-    `<div class="card" style="margin-bottom:1rem"><b>Permisos por rol</b><ul style="margin:.5rem 0 0;padding-left:1.2rem;color:var(--muted)"><li><b>Administrador:</b> todo, incluidos catálogos y usuarios.</li><li><b>Tesorería:</b> cobros, estado de cuenta y reportes de ingresos/morosos. No ve notas.</li><li><b>Tutor:</b> solo los grupos donde él es tutor; captura y consulta notas. No ve cobros.</li></ul></div><div id="tbl"></div>`;
+    `<div class="card" style="margin-bottom:1rem"><b>Permisos por rol</b><ul style="margin:.5rem 0 0;padding-left:1.2rem;color:var(--muted)"><li><b>Administrador:</b> todo, incluidos catálogos y usuarios.</li><li><b>Tesorería:</b> cobros, estado de cuenta y reportes de ingresos (incluido el secuencial) y morosos. No ve notas.</li><li><b>Tutor:</b> solo los grupos donde él es tutor; captura y consulta notas. No ve cobros.</li></ul></div><div id="tbl"></div>`;
   render(); bindTables(root, render);
   const form = (u) => formModal({
     title: u ? "Editar usuario" : "Nuevo usuario", values: u ? { ...u, activo: u.activo ? "1" : "0" } : { rol: "tutor", activo: "1" },
